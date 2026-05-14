@@ -1,20 +1,51 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase-client'
 
+type Rubro = { id: string; codigo: number; nombre: string }
+type DocRequerido = { id: string; codigo: string; nombre: string; tipo_vigencia: string; obligatorio: boolean }
+
 export default function RegistroPage() {
-  const [step, setStep] = useState(1)
+  const [rubros, setRubros] = useState<Rubro[]>([])
+  const [docsRequeridos, setDocsRequeridos] = useState<DocRequerido[]>([])
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(false)
+  const [error, setError] = useState('')
   const [form, setForm] = useState({
     razon_social: '',
     cuit: '',
     tipo_proveedor: 'PJ',
-    rubro: '',
+    rubro_id: '',
     email: '',
     telefono: '',
   })
+
+  // Cargar rubros al montar
+  useEffect(() => {
+    supabase
+      .from('rubros')
+      .select('id, codigo, nombre')
+      .eq('activo', true)
+      .order('codigo')
+      .then(({ data }) => { if (data) setRubros(data) })
+  }, [])
+
+  // Cargar documentos requeridos cuando cambia el rubro o tipo_proveedor
+  useEffect(() => {
+    if (!form.rubro_id) { setDocsRequeridos([]); return }
+
+    const esPF = form.tipo_proveedor === 'PF'
+    const esPJ = form.tipo_proveedor === 'PJ'
+
+    supabase
+      .from('documentos_requeridos')
+      .select('id, codigo, nombre, tipo_vigencia, obligatorio')
+      .eq('activo', true)
+      .eq(esPF ? 'aplica_persona_fisica' : 'aplica_persona_juridica', true)
+      .order('codigo')
+      .then(({ data }) => { if (data) setDocsRequeridos(data) })
+  }, [form.rubro_id, form.tipo_proveedor])
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) {
     setForm(f => ({ ...f, [e.target.name]: e.target.value }))
@@ -23,11 +54,61 @@ export default function RegistroPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
-    // TODO Sprint 1: insertar en proveedores + crear usuario Supabase Auth para proveedor
-    // Por ahora simula el éxito para probar el flujo visual
-    await new Promise(r => setTimeout(r, 1000))
-    setSuccess(true)
-    setLoading(false)
+    setError('')
+
+    try {
+      // 1. Obtener grupo_id
+      const { data: grupo } = await supabase
+        .from('grupos_trabajo')
+        .select('id')
+        .eq('slug', 'metrikpro')
+        .single()
+
+      if (!grupo) throw new Error('No se encontró el grupo de trabajo')
+
+      // 2. Insertar proveedor
+      const { data: proveedor, error: errProv } = await supabase
+        .from('proveedores')
+        .insert({
+          grupo_id: grupo.id,
+          razon_social: form.razon_social,
+          cuit: form.cuit.replace(/[-\s]/g, ''),
+          tipo_proveedor: form.tipo_proveedor,
+          rubro_id: form.rubro_id || null,
+          email: form.email,
+          telefono: form.telefono || null,
+          estado: 'PENDIENTE',
+        })
+        .select('id')
+        .single()
+
+      if (errProv) {
+        if (errProv.code === '23505') throw new Error('Ya existe un proveedor registrado con ese CUIT.')
+        throw new Error(errProv.message)
+      }
+
+      // 3. Crear documentos_legajo pendientes según rubro
+      if (docsRequeridos.length > 0 && proveedor) {
+        const docsAInsertar = docsRequeridos.map(doc => ({
+          proveedor_id: proveedor.id,
+          tipo_doc_id: doc.id,
+          estado: 'PENDIENTE',
+        }))
+        await supabase.from('documentos_legajo').insert(docsAInsertar)
+      }
+
+      setSuccess(true)
+    } catch (err: any) {
+      setError(err.message ?? 'Ocurrió un error. Intentá de nuevo.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const vigenciaLabel: Record<string, string> = {
+    PERMANENTE: 'Permanente',
+    ANUAL: 'Anual',
+    MENSUAL: 'Mensual',
   }
 
   if (success) {
@@ -39,10 +120,36 @@ export default function RegistroPage() {
               <polyline points="20,6 9,17 4,12"/>
             </svg>
           </div>
-          <h2 className="text-white text-xl font-medium mb-2">¡Registro recibido!</h2>
-          <p className="text-zinc-400 text-sm">
-            Revisaremos tu solicitud y te notificaremos por email cuando esté procesada.
+          <h2 className="text-white text-xl font-medium mb-3">¡Solicitud recibida!</h2>
+          <p className="text-zinc-400 text-sm leading-relaxed mb-2">
+            Tu solicitud de alta fue registrada correctamente.
           </p>
+          <p className="text-zinc-500 text-sm">
+            Te notificaremos a <span className="text-zinc-300">{form.email}</span> cuando sea procesada.
+          </p>
+          {docsRequeridos.length > 0 && (
+            <div className="mt-6 bg-white/[0.03] border border-white/[0.08] rounded-xl p-4 text-left">
+              <p className="text-zinc-400 text-xs font-medium mb-3 uppercase tracking-wide">
+                Documentos que deberás presentar ({docsRequeridos.length})
+              </p>
+              <ul className="space-y-2">
+                {docsRequeridos.map(doc => (
+                  <li key={doc.id} className="flex items-start gap-2">
+                    <span className="text-blue-400 mt-0.5">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                      </svg>
+                    </span>
+                    <div>
+                      <span className="text-zinc-300 text-xs">{doc.nombre}</span>
+                      <span className="text-zinc-600 text-xs ml-2">({vigenciaLabel[doc.tipo_vigencia]})</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       </div>
     )
@@ -50,7 +157,7 @@ export default function RegistroPage() {
 
   return (
     <div className="min-h-screen bg-[#0f1117] flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
+      <div className="w-full max-w-lg">
         {/* Header */}
         <div className="mb-8 text-center">
           <div className="inline-flex items-center gap-2 mb-3">
@@ -73,20 +180,28 @@ export default function RegistroPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-zinc-400 text-sm mb-1.5">Razón social *</label>
-              <input name="razon_social" value={form.razon_social} onChange={handleChange} required placeholder="Empresa S.A."
-                className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-4 py-2.5 text-white placeholder:text-zinc-600 text-sm focus:outline-none focus:border-blue-500/60 transition-all" />
+              <input
+                name="razon_social" value={form.razon_social} onChange={handleChange} required
+                placeholder="Empresa S.A."
+                className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-4 py-2.5 text-white placeholder:text-zinc-600 text-sm focus:outline-none focus:border-blue-500/60 transition-all"
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-zinc-400 text-sm mb-1.5">CUIT *</label>
-                <input name="cuit" value={form.cuit} onChange={handleChange} required placeholder="20-12345678-9"
-                  className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-4 py-2.5 text-white placeholder:text-zinc-600 text-sm focus:outline-none focus:border-blue-500/60 transition-all" />
+                <input
+                  name="cuit" value={form.cuit} onChange={handleChange} required
+                  placeholder="20-12345678-9"
+                  className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-4 py-2.5 text-white placeholder:text-zinc-600 text-sm focus:outline-none focus:border-blue-500/60 transition-all"
+                />
               </div>
               <div>
                 <label className="block text-zinc-400 text-sm mb-1.5">Tipo *</label>
-                <select name="tipo_proveedor" value={form.tipo_proveedor} onChange={handleChange}
-                  className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500/60 transition-all">
+                <select
+                  name="tipo_proveedor" value={form.tipo_proveedor} onChange={handleChange}
+                  className="w-full bg-[#1a1d27] border border-white/[0.1] rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500/60 transition-all"
+                >
                   <option value="PJ">Persona Jurídica</option>
                   <option value="PF">Persona Física</option>
                 </select>
@@ -95,35 +210,68 @@ export default function RegistroPage() {
 
             <div>
               <label className="block text-zinc-400 text-sm mb-1.5">Rubro *</label>
-              <select name="rubro" value={form.rubro} onChange={handleChange} required
-                className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500/60 transition-all">
+              <select
+                name="rubro_id" value={form.rubro_id} onChange={handleChange} required
+                className="w-full bg-[#1a1d27] border border-white/[0.1] rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500/60 transition-all"
+              >
                 <option value="">Seleccioná un rubro</option>
-                <option value="1">Fletes</option>
-                <option value="2">Intermediarios de fletes</option>
-                <option value="3">Arrendamiento</option>
-                <option value="4">Insumos agrícolas</option>
-                <option value="5">Operadores de granos</option>
-                <option value="6">Prestadores de servicios</option>
-                <option value="7">Construcción de obra</option>
-                <option value="8">Operadores de derivados</option>
-                <option value="9">General</option>
+                {rubros.map(r => (
+                  <option key={r.id} value={r.id}>{r.codigo}. {r.nombre}</option>
+                ))}
               </select>
             </div>
 
+            {/* Documentos requeridos dinámicos */}
+            {docsRequeridos.length > 0 && (
+              <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl p-4">
+                <p className="text-blue-300 text-xs font-medium mb-2.5 flex items-center gap-1.5">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                  </svg>
+                  Documentos requeridos para este rubro ({docsRequeridos.length})
+                </p>
+                <ul className="space-y-1.5">
+                  {docsRequeridos.map(doc => (
+                    <li key={doc.id} className="flex items-center justify-between">
+                      <span className="text-zinc-300 text-xs">{doc.nombre}</span>
+                      <span className="text-zinc-500 text-xs">{vigenciaLabel[doc.tipo_vigencia]}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             <div>
               <label className="block text-zinc-400 text-sm mb-1.5">Email de contacto *</label>
-              <input name="email" type="email" value={form.email} onChange={handleChange} required placeholder="contacto@empresa.com"
-                className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-4 py-2.5 text-white placeholder:text-zinc-600 text-sm focus:outline-none focus:border-blue-500/60 transition-all" />
+              <input
+                name="email" type="email" value={form.email} onChange={handleChange} required
+                placeholder="contacto@empresa.com"
+                className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-4 py-2.5 text-white placeholder:text-zinc-600 text-sm focus:outline-none focus:border-blue-500/60 transition-all"
+              />
             </div>
 
             <div>
               <label className="block text-zinc-400 text-sm mb-1.5">Teléfono</label>
-              <input name="telefono" value={form.telefono} onChange={handleChange} placeholder="+54 9 11 1234-5678"
-                className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-4 py-2.5 text-white placeholder:text-zinc-600 text-sm focus:outline-none focus:border-blue-500/60 transition-all" />
+              <input
+                name="telefono" value={form.telefono} onChange={handleChange}
+                placeholder="+54 9 11 1234-5678"
+                className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-4 py-2.5 text-white placeholder:text-zinc-600 text-sm focus:outline-none focus:border-blue-500/60 transition-all"
+              />
             </div>
 
-            <button type="submit" disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-medium rounded-lg py-2.5 text-sm transition-colors mt-2">
+            {error && (
+              <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" className="shrink-0">
+                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                <span className="text-red-400 text-sm">{error}</span>
+              </div>
+            )}
+
+            <button
+              type="submit" disabled={loading}
+              className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg py-2.5 text-sm transition-colors mt-2"
+            >
               {loading ? 'Enviando...' : 'Enviar solicitud de alta'}
             </button>
           </form>
