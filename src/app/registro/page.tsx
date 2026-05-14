@@ -57,45 +57,17 @@ export default function RegistroPage() {
     setError('')
 
     try {
-      // 1. Obtener grupo_id
-      const { data: grupo } = await supabase
-        .from('grupos_trabajo')
-        .select('id')
-        .eq('slug', 'metrikpro')
-        .single()
+      const { data, error: errFn } = await supabase.rpc('registrar_proveedor', {
+        p_razon_social:   form.razon_social,
+        p_cuit:           form.cuit.replace(/[-\s]/g, ''),
+        p_tipo_proveedor: form.tipo_proveedor,
+        p_rubro_id:       form.rubro_id || null,
+        p_email:          form.email,
+        p_telefono:       form.telefono || null,
+      })
 
-      if (!grupo) throw new Error('No se encontró el grupo de trabajo')
-
-      // 2. Insertar proveedor
-      const { data: proveedor, error: errProv } = await supabase
-        .from('proveedores')
-        .insert({
-          grupo_id: grupo.id,
-          razon_social: form.razon_social,
-          cuit: form.cuit.replace(/[-\s]/g, ''),
-          tipo_proveedor: form.tipo_proveedor,
-          rubro_id: form.rubro_id || null,
-          email: form.email,
-          telefono: form.telefono || null,
-          estado: 'PENDIENTE',
-        })
-        .select('id')
-        .single()
-
-      if (errProv) {
-        if (errProv.code === '23505') throw new Error('Ya existe un proveedor registrado con ese CUIT.')
-        throw new Error(errProv.message)
-      }
-
-      // 3. Crear documentos_legajo pendientes según rubro
-      if (docsRequeridos.length > 0 && proveedor) {
-        const docsAInsertar = docsRequeridos.map(doc => ({
-          proveedor_id: proveedor.id,
-          tipo_doc_id: doc.id,
-          estado: 'PENDIENTE',
-        }))
-        await supabase.from('documentos_legajo').insert(docsAInsertar)
-      }
+      if (errFn) throw new Error(errFn.message)
+      if (data?.error) throw new Error(data.error)
 
       setSuccess(true)
     } catch (err: any) {
