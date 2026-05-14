@@ -24,28 +24,19 @@ export async function middleware(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   const pathname = request.nextUrl.pathname
 
-  // Rutas públicas — no requieren autenticación
   const rutasPublicas = [
     '/login',
     '/activar',
     '/cambiar-password',
     '/auth',
-    '/registro',      // portal público de autoregistro para proveedores
-    '/qr',            // validación pública de QR
+    '/registro',
+    '/qr',
   ]
   const esPublica = rutasPublicas.some(p => pathname.startsWith(p))
 
-  // Sin sesión → redirigir a login
   if (!user && !esPublica) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
-    return NextResponse.redirect(url)
-  }
-
-  // Con sesión → no dejar entrar al login
-  if (user && pathname === '/login') {
-    const url = request.nextUrl.clone()
-    url.pathname = '/dashboard'
     return NextResponse.redirect(url)
   }
 
