@@ -19,6 +19,7 @@ export default function RegistroPage() {
     rubro_id: '',
     email: '',
     telefono: '',
+    notif_vencimientos: false,
   })
 
   // Cargar rubros al montar
@@ -48,7 +49,8 @@ export default function RegistroPage() {
   }, [form.rubro_id, form.tipo_proveedor])
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) {
-    setForm(f => ({ ...f, [e.target.name]: e.target.value }))
+    const value = e.target.type === 'checkbox' ? (e.target as HTMLInputElement).checked : e.target.value
+    setForm(f => ({ ...f, [e.target.name]: value }))
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -64,6 +66,7 @@ export default function RegistroPage() {
         p_rubro_id:       form.rubro_id || null,
         p_email:          form.email,
         p_telefono:       form.telefono || null,
+        p_notif_vencimientos: form.notif_vencimientos,
       })
 
       if (errFn) throw new Error(errFn.message)
@@ -239,6 +242,21 @@ export default function RegistroPage() {
                 <span className="text-red-400 text-sm">{error}</span>
               </div>
             )}
+
+            {/* Opt-in notificaciones */}
+            <label className="flex items-start gap-3 cursor-pointer group">
+              <input
+                type="checkbox"
+                name="notif_vencimientos"
+                checked={form.notif_vencimientos}
+                onChange={handleChange}
+                className="mt-0.5 w-4 h-4 rounded border border-white/[0.2] bg-white/[0.05] accent-blue-500 cursor-pointer"
+              />
+              <div>
+                <span className="text-zinc-300 text-sm">Quiero recibir alertas de vencimiento por email</span>
+                <p className="text-zinc-600 text-xs mt-0.5">Te avisaremos 7 días antes de que venza cada documento</p>
+              </div>
+            </label>
 
             <button
               type="submit" disabled={loading}
