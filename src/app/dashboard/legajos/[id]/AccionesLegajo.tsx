@@ -14,10 +14,25 @@ export default function AccionesLegajo({ proveedorId, estadoActual }: Props) {
 
   async function cambiarEstado(nuevoEstado: string) {
     setLoading(true)
+
     await supabase
       .from('proveedores')
       .update({ estado: nuevoEstado, updated_at: new Date().toISOString() })
       .eq('id', proveedorId)
+
+    // Disparar email de notificación
+    const tipoEmail =
+      nuevoEstado === 'APROBADO'  ? 'aprobado'  :
+      nuevoEstado === 'RECHAZADO' ? 'rechazado' : null
+
+    if (tipoEmail) {
+      fetch('/api/email/notificar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tipo: tipoEmail, proveedor_id: proveedorId }),
+      }).catch(() => {}) // silencioso si falla — no bloqueamos la UI
+    }
+
     setLoading(false)
     setShowObs(false)
     router.refresh()
