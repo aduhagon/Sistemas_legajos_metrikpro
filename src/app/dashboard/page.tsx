@@ -79,7 +79,7 @@ export default async function DashboardPage() {
           <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-2xl p-5 mb-6">
             <div className="flex items-center gap-2 mb-3">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#eab308" strokeWidth="2">
-                <triangle points="12 2 22 21 2 21"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                <polygon points="12 2 22 21 2 21"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
               </svg>
               <span className="text-yellow-400 text-sm font-medium">
                 {porVencer.length} documento{porVencer.length > 1 ? 's' : ''} por vencer en los próximos 7 días
