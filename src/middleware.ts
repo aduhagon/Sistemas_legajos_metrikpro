@@ -24,6 +24,7 @@ export async function middleware(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   const pathname = request.nextUrl.pathname
 
+  // Rutas públicas — no requieren autenticación
   const rutasPublicas = [
     '/login',
     '/activar',
@@ -31,15 +32,18 @@ export async function middleware(request: NextRequest) {
     '/auth',
     '/registro',
     '/qr',
+    '/proveedor',
   ]
   const esPublica = rutasPublicas.some(p => pathname.startsWith(p))
 
+  // Sin sesión y ruta privada → redirigir a login
   if (!user && !esPublica) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
   }
 
+  // NO redirigir si ya tiene sesión — dejar que cada página lo maneje
   return supabaseResponse
 }
 
