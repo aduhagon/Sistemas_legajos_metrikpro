@@ -59,7 +59,7 @@ export default function PortalDocumentosPage() {
       .eq('proveedor_id', data.id)
       .order('documentos_requeridos(codigo)')
 
-    setDocs((docsData as DocLegajo[]) ?? [])
+    setDocs((docsData as unknown as DocLegajo[]) ?? [])
     setBuscando(false)
   }
 
