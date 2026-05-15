@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { supabase } from '@/lib/supabase-client'
 import { QRCodeSVG } from 'qrcode.react'
 
@@ -35,6 +35,8 @@ export default function PortalDocumentosPage() {
   const [subiendo, setSubiendo] = useState<string | null>(null)
   const [uploadOk, setUploadOk] = useState<string | null>(null)
   const [vistaActual, setVistaActual] = useState<'docs' | 'qr'>('docs')
+  // fecha_venc por doc_id — el proveedor la ingresa antes de subir
+  const [fechas, setFechas] = useState<Record<string, string>>({})
 
   async function buscarProveedor(e: React.FormEvent) {
     e.preventDefault()
@@ -68,7 +70,6 @@ export default function PortalDocumentosPage() {
 
     setDocs((docsData as unknown as DocLegajo[]) ?? [])
 
-    // Cargar habilitación si existe
     const { data: habData } = await supabase
       .from('habilitaciones')
       .select('id, qr_token, estado, fecha_venc')
@@ -77,11 +78,18 @@ export default function PortalDocumentosPage() {
       .single()
 
     if (habData) setHabilitacion(habData)
-
     setBuscando(false)
   }
 
   async function handleUpload(docId: string, file: File) {
+    const dr = docs.find(d => d.id === docId)?.documentos_requeridos
+    const necesitaFecha = dr?.tipo_vigencia !== 'PERMANENTE'
+
+    if (necesitaFecha && !fechas[docId]) {
+      setError(`Ingresá la fecha de vencimiento del documento "${dr?.nombre}" antes de subir.`)
+      return
+    }
+
     setSubiendo(docId)
     setUploadOk(null)
     setError('')
@@ -106,10 +114,19 @@ export default function PortalDocumentosPage() {
 
       await supabase
         .from('documentos_legajo')
-        .update({ archivo_url: urlData?.signedUrl ?? path, hash_sha256: hash, estado: 'CARGADO', updated_at: new Date().toISOString() })
+        .update({
+          archivo_url: urlData?.signedUrl ?? path,
+          hash_sha256: hash,
+          estado: 'CARGADO',
+          fecha_venc: fechas[docId] || null,
+          updated_at: new Date().toISOString(),
+        })
         .eq('id', docId)
 
-      setDocs(prev => prev.map(d => d.id === docId ? { ...d, estado: 'CARGADO', archivo_url: urlData?.signedUrl ?? path } : d))
+      setDocs(prev => prev.map(d => d.id === docId
+        ? { ...d, estado: 'CARGADO', archivo_url: urlData?.signedUrl ?? path, fecha_venc: fechas[docId] || null }
+        : d
+      ))
       setUploadOk(docId)
     } catch (err: any) {
       setError(`Error al subir: ${err.message}`)
@@ -156,7 +173,6 @@ export default function PortalDocumentosPage() {
             </div>
             <p className="text-zinc-500 text-sm">Portal de documentación</p>
           </div>
-
           <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-8">
             <h1 className="text-white font-medium text-xl mb-2">Cargá tu documentación</h1>
             <p className="text-zinc-500 text-sm mb-6">Ingresá tu CUIT para acceder a tu legajo.</p>
@@ -166,11 +182,7 @@ export default function PortalDocumentosPage() {
                 <input value={cuit} onChange={e => setCuit(e.target.value)} required placeholder="20-12345678-9"
                   className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-4 py-2.5 text-white placeholder:text-zinc-600 text-sm focus:outline-none focus:border-blue-500/60 transition-all"/>
               </div>
-              {error && (
-                <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
-                  <span className="text-red-400 text-sm">{error}</span>
-                </div>
-              )}
+              {error && <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2"><span className="text-red-400 text-sm">{error}</span></div>}
               <button type="submit" disabled={buscando}
                 className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-medium rounded-lg py-2.5 text-sm transition-colors">
                 {buscando ? 'Buscando...' : 'Ver mi legajo'}
@@ -192,7 +204,6 @@ export default function PortalDocumentosPage() {
     <div className="min-h-screen bg-[#0f1117] text-white p-4 md:p-8">
       <div className="max-w-2xl mx-auto">
 
-        {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <div className="w-7 h-7 bg-blue-500 rounded flex items-center justify-center">
@@ -206,9 +217,7 @@ export default function PortalDocumentosPage() {
             <span className="font-medium text-sm">Sistema Legajos</span>
           </div>
           <button onClick={() => { setProveedor(null); setCuit(''); setDocs([]) }}
-            className="text-zinc-600 hover:text-zinc-400 text-xs transition-colors">
-            Cerrar sesión →
-          </button>
+            className="text-zinc-600 hover:text-zinc-400 text-xs transition-colors">Cerrar sesión →</button>
         </div>
 
         {/* Info proveedor */}
@@ -239,20 +248,12 @@ export default function PortalDocumentosPage() {
         {/* Tabs */}
         <div className="flex gap-2 mb-4">
           <button onClick={() => setVistaActual('docs')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-              vistaActual === 'docs'
-                ? 'bg-white/[0.08] text-white'
-                : 'text-zinc-500 hover:text-zinc-300'
-            }`}>
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${vistaActual === 'docs' ? 'bg-white/[0.08] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>
             Mis documentos
           </button>
           {habilitacion && (
             <button onClick={() => setVistaActual('qr')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                vistaActual === 'qr'
-                  ? 'bg-white/[0.08] text-white'
-                  : 'text-zinc-500 hover:text-zinc-300'
-              }`}>
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${vistaActual === 'qr' ? 'bg-white/[0.08] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>
               Mi carnet QR
             </button>
           )}
@@ -263,16 +264,19 @@ export default function PortalDocumentosPage() {
           <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
             <div className="px-6 py-4 border-b border-white/[0.06]">
               <h3 className="text-sm font-medium">Documentos requeridos</h3>
-              <p className="text-zinc-500 text-xs mt-0.5">PDF, JPG o PNG — máximo 10MB</p>
+              <p className="text-zinc-500 text-xs mt-0.5">PDF, JPG o PNG — máximo 10MB · Ingresá la fecha de vencimiento antes de subir</p>
             </div>
             <div className="divide-y divide-white/[0.04]">
               {docs.map(doc => {
                 const dr = doc.documentos_requeridos
                 const dcfg = estadoConfig[doc.estado] ?? estadoConfig.PENDIENTE
                 const estaSubiendo = subiendo === doc.id
+                const necesitaFecha = dr?.tipo_vigencia !== 'PERMANENTE'
+                const puedeSubir = doc.estado !== 'APROBADO'
+
                 return (
                   <div key={doc.id} className="px-6 py-4">
-                    <div className="flex items-start justify-between gap-4">
+                    <div className="flex items-start justify-between gap-4 mb-2">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-0.5">
                           <span className="text-zinc-500 text-xs font-mono shrink-0">{dr?.codigo}</span>
@@ -281,6 +285,11 @@ export default function PortalDocumentosPage() {
                         </div>
                         <div className="flex items-center gap-3 flex-wrap">
                           <span className="text-zinc-600 text-xs">{dr?.tipo_vigencia}</span>
+                          {doc.fecha_venc && (
+                            <span className="text-zinc-500 text-xs">
+                              Vence: {new Date(doc.fecha_venc).toLocaleDateString('es-AR')}
+                            </span>
+                          )}
                           {doc.observaciones && <span className="text-orange-400 text-xs">⚠ {doc.observaciones}</span>}
                           {uploadOk === doc.id && <span className="text-green-400 text-xs">✓ Subido correctamente</span>}
                         </div>
@@ -293,7 +302,7 @@ export default function PortalDocumentosPage() {
                           dcfg.color === 'orange' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' :
                           'bg-zinc-500/10 text-zinc-500 border-zinc-500/20'
                         }`}>{dcfg.label}</span>
-                        {doc.archivo_url && doc.estado !== 'RECHAZADO' && (
+                        {doc.archivo_url && (
                           <a href={doc.archivo_url} target="_blank" rel="noopener noreferrer"
                             className="text-zinc-500 hover:text-zinc-300 transition-colors">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -302,17 +311,33 @@ export default function PortalDocumentosPage() {
                             </svg>
                           </a>
                         )}
-                        {doc.estado !== 'APROBADO' && (
-                          <label className={`cursor-pointer ${estaSubiendo ? 'opacity-50 pointer-events-none' : ''}`}>
-                            <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden"
-                              onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(doc.id, f) }}/>
-                            <span className="bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.1] text-zinc-300 text-xs px-3 py-1.5 rounded-lg transition-all inline-block">
-                              {estaSubiendo ? 'Subiendo...' : doc.estado === 'RECHAZADO' ? 'Resubir' : 'Subir'}
-                            </span>
-                          </label>
-                        )}
                       </div>
                     </div>
+
+                    {/* Fecha de vencimiento + botón subir */}
+                    {puedeSubir && (
+                      <div className="flex items-center gap-2 mt-2">
+                        {necesitaFecha && (
+                          <div className="flex items-center gap-2 flex-1">
+                            <label className="text-zinc-500 text-xs shrink-0">Fecha venc.:</label>
+                            <input
+                              type="date"
+                              value={fechas[doc.id] || doc.fecha_venc || ''}
+                              onChange={e => setFechas(f => ({ ...f, [doc.id]: e.target.value }))}
+                              min={new Date().toISOString().split('T')[0]}
+                              className="bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-1 text-white text-xs focus:outline-none focus:border-blue-500/60 transition-all"
+                            />
+                          </div>
+                        )}
+                        <label className={`cursor-pointer ${estaSubiendo ? 'opacity-50 pointer-events-none' : ''}`}>
+                          <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden"
+                            onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(doc.id, f) }}/>
+                          <span className="bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.1] text-zinc-300 text-xs px-3 py-1.5 rounded-lg transition-all inline-block">
+                            {estaSubiendo ? 'Subiendo...' : doc.estado === 'RECHAZADO' ? 'Resubir' : 'Subir archivo'}
+                          </span>
+                        </label>
+                      </div>
+                    )}
                   </div>
                 )
               })}
@@ -325,37 +350,21 @@ export default function PortalDocumentosPage() {
           <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-8 text-center">
             <h3 className="text-sm font-medium mb-1">Carnet de acceso</h3>
             <p className="text-zinc-500 text-xs mb-6">Presentá este QR en el punto de ingreso</p>
-
-            {/* QR Code */}
             <div className="bg-white rounded-2xl p-6 inline-block mb-6">
-              <QRCodeSVG
-                value={qrUrl}
-                size={200}
-                level="H"
-                includeMargin={false}
-              />
+              <QRCodeSVG value={qrUrl} size={200} level="H" includeMargin={false}/>
             </div>
-
-            {/* Datos */}
             <div className="space-y-2 mb-6">
               <p className="text-white font-medium">{proveedor.razon_social}</p>
               <p className="text-zinc-500 text-sm">CUIT {proveedor.cuit}</p>
               {habilitacion.fecha_venc && (
                 <p className="text-zinc-500 text-sm">
-                  Válido hasta{' '}
-                  <span className="text-zinc-300">
+                  Válido hasta <span className="text-zinc-300">
                     {new Date(habilitacion.fecha_venc).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                   </span>
                 </p>
               )}
             </div>
-
-            {/* Estado */}
-            <span className="bg-green-500/10 text-green-400 border border-green-500/20 text-sm px-4 py-1.5 rounded-full">
-              ✓ Habilitado
-            </span>
-
-            {/* Link para compartir */}
+            <span className="bg-green-500/10 text-green-400 border border-green-500/20 text-sm px-4 py-1.5 rounded-full">✓ Habilitado</span>
             <div className="mt-6">
               <p className="text-zinc-600 text-xs mb-2">Link de verificación</p>
               <div className="bg-white/[0.03] border border-white/[0.06] rounded-lg px-3 py-2">
@@ -370,7 +379,6 @@ export default function PortalDocumentosPage() {
             <span className="text-red-400 text-sm">{error}</span>
           </div>
         )}
-
       </div>
     </div>
   )

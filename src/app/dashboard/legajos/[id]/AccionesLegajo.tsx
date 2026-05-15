@@ -4,35 +4,38 @@ import { useState } from 'react'
 import { supabase } from '@/lib/supabase-client'
 import { useRouter } from 'next/navigation'
 
-type Props = { proveedorId: string; estadoActual: string }
+type Props = {
+  proveedorId: string
+  estadoActual: string
+  puedeAprobar?: boolean
+  mensajeBloqueo?: string
+}
 
-export default function AccionesLegajo({ proveedorId, estadoActual }: Props) {
+export default function AccionesLegajo({ proveedorId, estadoActual, puedeAprobar = true, mensajeBloqueo }: Props) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [obs, setObs] = useState('')
   const [showObs, setShowObs] = useState(false)
+  const [errorMsg, setErrorMsg] = useState('')
 
   async function aprobar() {
     setLoading(true)
-
-    // Obtener usuario actual
+    setErrorMsg('')
     const { data: { user } } = await supabase.auth.getUser()
-
-    // Usar función que crea habilitación automáticamente
-    const { error } = await supabase.rpc('aprobar_proveedor', {
+    const { data, error } = await supabase.rpc('aprobar_proveedor', {
       p_proveedor_id: proveedorId,
       p_evaluador_id: user?.id,
     })
-
-    if (!error) {
-      // Enviar email al proveedor
-      fetch('/api/email/notificar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tipo: 'aprobado', proveedor_id: proveedorId }),
-      }).catch(() => {})
+    if (error || data?.ok === false) {
+      setErrorMsg(data?.error ?? error?.message ?? 'Error al aprobar')
+      setLoading(false)
+      return
     }
-
+    fetch('/api/email/notificar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipo: 'aprobado', proveedor_id: proveedorId }),
+    }).catch(() => {})
     setLoading(false)
     router.refresh()
   }
@@ -40,19 +43,16 @@ export default function AccionesLegajo({ proveedorId, estadoActual }: Props) {
   async function rechazar() {
     setLoading(true)
     const { data: { user } } = await supabase.auth.getUser()
-
     await supabase.rpc('rechazar_proveedor', {
-      p_proveedor_id:   proveedorId,
-      p_evaluador_id:   user?.id,
-      p_observaciones:  obs,
+      p_proveedor_id: proveedorId,
+      p_evaluador_id: user?.id,
+      p_observaciones: obs,
     })
-
     fetch('/api/email/notificar', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tipo: 'rechazado', proveedor_id: proveedorId }),
     }).catch(() => {})
-
     setLoading(false)
     setShowObs(false)
     router.refresh()
@@ -60,8 +60,7 @@ export default function AccionesLegajo({ proveedorId, estadoActual }: Props) {
 
   async function cambiarEstado(nuevoEstado: string) {
     setLoading(true)
-    await supabase
-      .from('proveedores')
+    await supabase.from('proveedores')
       .update({ estado: nuevoEstado, updated_at: new Date().toISOString() })
       .eq('id', proveedorId)
     setLoading(false)
@@ -71,19 +70,16 @@ export default function AccionesLegajo({ proveedorId, estadoActual }: Props) {
   if (estadoActual === 'APROBADO') {
     return (
       <div className="flex items-center gap-2">
-        <span className="bg-green-500/10 text-green-400 border border-green-500/20 text-xs px-3 py-1.5 rounded-full">
-          ✓ Aprobado
-        </span>
+        <span className="bg-green-500/10 text-green-400 border border-green-500/20 text-xs px-3 py-1.5 rounded-full">✓ Aprobado</span>
         <button onClick={() => cambiarEstado('SUSPENDIDO')} disabled={loading}
-          className="text-zinc-500 hover:text-red-400 text-xs transition-colors px-2">
-          Suspender
-        </button>
+          className="text-zinc-500 hover:text-red-400 text-xs transition-colors px-2">Suspender</button>
       </div>
     )
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-col items-end gap-2">
+      {errorMsg && <p className="text-red-400 text-xs">{errorMsg}</p>}
       {showObs ? (
         <div className="flex items-center gap-2">
           <input value={obs} onChange={e => setObs(e.target.value)}
@@ -93,26 +89,30 @@ export default function AccionesLegajo({ proveedorId, estadoActual }: Props) {
             className="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-xs px-3 py-1.5 rounded-lg transition-all disabled:opacity-40">
             Confirmar rechazo
           </button>
-          <button onClick={() => setShowObs(false)}
-            className="text-zinc-500 hover:text-zinc-300 text-xs transition-colors">
-            Cancelar
-          </button>
+          <button onClick={() => setShowObs(false)} className="text-zinc-500 hover:text-zinc-300 text-xs transition-colors">Cancelar</button>
         </div>
       ) : (
-        <>
+        <div className="flex items-center gap-2">
           <button onClick={() => cambiarEstado('EN_REVISION')} disabled={loading}
             className="bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 text-xs px-3 py-1.5 rounded-lg transition-all disabled:opacity-40">
             Marcar en revisión
           </button>
-          <button onClick={aprobar} disabled={loading}
-            className="bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/20 text-xs px-3 py-1.5 rounded-lg transition-all disabled:opacity-40">
-            Aprobar legajo
-          </button>
+          <div className="relative group">
+            <button onClick={aprobar} disabled={loading || !puedeAprobar}
+              className="bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/20 text-xs px-3 py-1.5 rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+              Aprobar legajo
+            </button>
+            {!puedeAprobar && mensajeBloqueo && (
+              <div className="absolute right-0 top-8 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-300 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                {mensajeBloqueo}
+              </div>
+            )}
+          </div>
           <button onClick={() => setShowObs(true)} disabled={loading}
             className="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-xs px-3 py-1.5 rounded-lg transition-all disabled:opacity-40">
             Rechazar
           </button>
-        </>
+        </div>
       )}
     </div>
   )
