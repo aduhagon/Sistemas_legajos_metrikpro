@@ -92,11 +92,11 @@ export async function GET(req: Request) {
 
     // Email al proveedor — SOLO si eligió recibir alertas (notif_vencimientos = true)
     if (smtpOk) {
-      const proveedoresNotif = [...new Map(
+      const proveedoresNotif = Array.from(new Map(
         docsVencidos
           .filter((d: any) => d.proveedores?.notif_vencimientos)
           .map((d: any) => [d.proveedores.id, d.proveedores])
-      ).values()]
+      ).values())
 
       for (const prov of proveedoresNotif as any[]) {
         const docsDelProv = docsVencidos.filter((d: any) => d.proveedores?.id === prov.id)
@@ -157,11 +157,11 @@ export async function GET(req: Request) {
 
     // Email al proveedor — SOLO si eligió recibir alertas
     if (smtpOk) {
-      const proveedoresNotif = [...new Map(
+      const proveedoresNotif = Array.from(new Map(
         docsPorVencer
           .filter((d: any) => (d.proveedores as any)?.notif_vencimientos)
           .map((d: any) => [(d.proveedores as any).id, d.proveedores])
-      ).values()]
+      ).values())
 
       for (const prov of proveedoresNotif as any[]) {
         const docsDelProv = docsPorVencer.filter((d: any) => (d.proveedores as any)?.id === prov.id)
