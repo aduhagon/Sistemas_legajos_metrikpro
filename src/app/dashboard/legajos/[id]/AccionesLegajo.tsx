@@ -12,29 +12,59 @@ export default function AccionesLegajo({ proveedorId, estadoActual }: Props) {
   const [obs, setObs] = useState('')
   const [showObs, setShowObs] = useState(false)
 
-  async function cambiarEstado(nuevoEstado: string) {
+  async function aprobar() {
     setLoading(true)
 
+    // Obtener usuario actual
+    const { data: { user } } = await supabase.auth.getUser()
+
+    // Usar función que crea habilitación automáticamente
+    const { error } = await supabase.rpc('aprobar_proveedor', {
+      p_proveedor_id: proveedorId,
+      p_evaluador_id: user?.id,
+    })
+
+    if (!error) {
+      // Enviar email al proveedor
+      fetch('/api/email/notificar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tipo: 'aprobado', proveedor_id: proveedorId }),
+      }).catch(() => {})
+    }
+
+    setLoading(false)
+    router.refresh()
+  }
+
+  async function rechazar() {
+    setLoading(true)
+    const { data: { user } } = await supabase.auth.getUser()
+
+    await supabase.rpc('rechazar_proveedor', {
+      p_proveedor_id:   proveedorId,
+      p_evaluador_id:   user?.id,
+      p_observaciones:  obs,
+    })
+
+    fetch('/api/email/notificar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipo: 'rechazado', proveedor_id: proveedorId }),
+    }).catch(() => {})
+
+    setLoading(false)
+    setShowObs(false)
+    router.refresh()
+  }
+
+  async function cambiarEstado(nuevoEstado: string) {
+    setLoading(true)
     await supabase
       .from('proveedores')
       .update({ estado: nuevoEstado, updated_at: new Date().toISOString() })
       .eq('id', proveedorId)
-
-    // Disparar email de notificación
-    const tipoEmail =
-      nuevoEstado === 'APROBADO'  ? 'aprobado'  :
-      nuevoEstado === 'RECHAZADO' ? 'rechazado' : null
-
-    if (tipoEmail) {
-      fetch('/api/email/notificar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tipo: tipoEmail, proveedor_id: proveedorId }),
-      }).catch(() => {}) // silencioso si falla — no bloqueamos la UI
-    }
-
     setLoading(false)
-    setShowObs(false)
     router.refresh()
   }
 
@@ -56,12 +86,10 @@ export default function AccionesLegajo({ proveedorId, estadoActual }: Props) {
     <div className="flex items-center gap-2">
       {showObs ? (
         <div className="flex items-center gap-2">
-          <input
-            value={obs} onChange={e => setObs(e.target.value)}
+          <input value={obs} onChange={e => setObs(e.target.value)}
             placeholder="Motivo del rechazo..."
-            className="bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:border-red-500/50 w-48"
-          />
-          <button onClick={() => cambiarEstado('RECHAZADO')} disabled={loading || !obs}
+            className="bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:border-red-500/50 w-48"/>
+          <button onClick={rechazar} disabled={loading || !obs}
             className="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-xs px-3 py-1.5 rounded-lg transition-all disabled:opacity-40">
             Confirmar rechazo
           </button>
@@ -76,7 +104,7 @@ export default function AccionesLegajo({ proveedorId, estadoActual }: Props) {
             className="bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 text-xs px-3 py-1.5 rounded-lg transition-all disabled:opacity-40">
             Marcar en revisión
           </button>
-          <button onClick={() => cambiarEstado('APROBADO')} disabled={loading}
+          <button onClick={aprobar} disabled={loading}
             className="bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/20 text-xs px-3 py-1.5 rounded-lg transition-all disabled:opacity-40">
             Aprobar legajo
           </button>
