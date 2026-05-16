@@ -43,8 +43,8 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
   }
 
   return (
-    <div className="min-h-screen bg-[#0f1117] text-white p-8">
-      <div className="max-w-4xl mx-auto">
+    <div>
+      <div className="max-w-4xl">
 
         {/* Header */}
         <div className="flex items-center gap-4 mb-8">
