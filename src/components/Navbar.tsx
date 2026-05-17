@@ -24,6 +24,7 @@ export default function Navbar({ nombre, rol }: Props) {
     { href: '/dashboard/legajos',        label: 'Legajos',       roles: ['admin', 'evaluador'] },
     { href: '/dashboard/configuracion',  label: 'Configuración', roles: ['admin'] },
     { href: '/dashboard/admin/rubros',   label: 'Rubros y docs',  roles: ['admin'] },
+    { href: '/dashboard/reportes',       label: 'Reportes',       roles: ['admin', 'evaluador'] },
   ]
 
   const linksVisibles = links.filter(l => l.roles.includes(rol))
