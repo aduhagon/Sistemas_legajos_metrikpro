@@ -33,6 +33,30 @@ export default function ProveedorPortalPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.push('/proveedor/login'); return }
 
+    // Si viene del callback de confirmación de email, completar el registro
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('nuevo') === '1') {
+      const datosGuardados = sessionStorage.getItem('registro_proveedor_pendiente')
+      if (datosGuardados) {
+        try {
+          const datos = JSON.parse(datosGuardados)
+          await supabase.rpc('registrar_proveedor_con_cuenta', {
+            p_razon_social:       datos.razon_social,
+            p_cuit:               datos.cuit,
+            p_tipo_proveedor:     datos.tipo_proveedor,
+            p_rubro_id:           datos.rubro_id,
+            p_email:              datos.email,
+            p_telefono:           datos.telefono,
+            p_notif_vencimientos: datos.notif_vencimientos,
+            p_user_id:            user.id,
+          })
+          sessionStorage.removeItem('registro_proveedor_pendiente')
+        } catch (e) {
+          console.error('Error completando registro:', e)
+        }
+      }
+    }
+
     const { data: miProv } = await supabase.rpc('get_mi_proveedor')
     if (!miProv) { router.push('/proveedor/login'); return }
 
