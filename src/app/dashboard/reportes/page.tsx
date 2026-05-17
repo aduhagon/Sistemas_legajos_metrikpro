@@ -10,8 +10,9 @@ export default async function ReportesPage() {
   const hoy = new Date()
   const en30dias = new Date(hoy)
   en30dias.setDate(hoy.getDate() + 30)
+  const hoyStr = hoy.toISOString().split('T')[0]
+  const en30diasStr = en30dias.toISOString().split('T')[0]
 
-  // Stats generales
   const [
     { count: total },
     { count: pendientes },
@@ -28,60 +29,62 @@ export default async function ReportesPage() {
     supabase.from('proveedores').select('*', { count: 'exact', head: true }).eq('estado', 'SUSPENDIDO'),
   ])
 
-  // Documentos por vencer en 30 días
   const { data: vencimientos } = await supabase
     .from('documentos_legajo')
-    .select(`
-      id, fecha_venc, estado,
-      documentos_requeridos(codigo, nombre, tipo_vigencia),
-      proveedores(id, razon_social, cuit, email, rubros(nombre))
-    `)
+    .select(`id, fecha_venc, estado,
+      documentos_requeridos(codigo, nombre),
+      proveedores(id, razon_social, cuit, email, rubros(nombre))`)
     .not('fecha_venc', 'is', null)
-    .lte('fecha_venc', en30dias.toISOString().split('T')[0])
-    .gte('fecha_venc', hoy.toISOString().split('T')[0])
+    .lte('fecha_venc', en30diasStr)
+    .gte('fecha_venc', hoyStr)
     .in('estado', ['CARGADO', 'APROBADO'])
     .order('fecha_venc')
 
-  // Documentos vencidos
   const { data: vencidos } = await supabase
     .from('documentos_legajo')
-    .select(`
-      id, fecha_venc, estado,
+    .select(`id, fecha_venc, estado,
       documentos_requeridos(codigo, nombre),
-      proveedores(id, razon_social, cuit, rubros(nombre))
-    `)
-    .lt('fecha_venc', hoy.toISOString().split('T')[0])
+      proveedores(id, razon_social, cuit, rubros(nombre))`)
+    .lt('fecha_venc', hoyStr)
     .eq('estado', 'VENCIDO')
     .order('fecha_venc', { ascending: false })
     .limit(50)
 
-  // Proveedores por rubro
   const { data: porRubro } = await supabase
-    .from('proveedores')
-    .select('rubros(nombre), estado')
+    .from('proveedores').select('rubros(nombre), estado')
 
-  // Actividad reciente — últimos 20 cambios
   const { data: actividad } = await supabase
     .from('audit_log')
     .select('id, accion, entidad, datos_json, created_at')
     .order('created_at', { ascending: false })
     .limit(20)
 
-  // Todos los proveedores para exportar
   const { data: todosProveedores } = await supabase
     .from('proveedores')
-    .select(`
-      id, razon_social, cuit, tipo_proveedor, estado, email, telefono, created_at, notif_vencimientos,
+    .select(`id, razon_social, cuit, tipo_proveedor, estado, email, telefono, created_at, notif_vencimientos,
       rubros(nombre),
-      documentos_legajo(id, estado, fecha_venc, documentos_requeridos(nombre))
-    `)
+      documentos_legajo(id, estado, fecha_venc, documentos_requeridos(nombre))`)
     .order('razon_social')
+
+  // Accesos — últimos 200
+  const { data: accesos } = await supabase
+    .from('registros_acceso')
+    .select(`id, tipo, created_at, lat, lng, dentro_perimetro,
+      habilitaciones(proveedor_id, proveedores(id, razon_social, cuit, rubros(nombre)))`)
+    .order('created_at', { ascending: false })
+    .limit(200)
+
+  const { data: establecimientos } = await supabase
+    .from('establecimientos')
+    .select('id, nombre')
+    .eq('activo', true)
+    .order('nombre')
 
   return (
     <div>
       <div className="mb-6">
         <h1 className="text-xl font-medium">Reportes</h1>
-        <p className="text-zinc-500 text-sm">Métricas, vencimientos y exportación de datos</p>
+        <p className="text-zinc-500 text-sm">Métricas, accesos, vencimientos y exportación de datos</p>
       </div>
       <ReportesClient
         stats={{ total: total ?? 0, pendientes: pendientes ?? 0, enRevision: enRevision ?? 0, aprobados: aprobados ?? 0, rechazados: rechazados ?? 0, suspendidos: suspendidos ?? 0 }}
@@ -90,6 +93,8 @@ export default async function ReportesPage() {
         porRubro={porRubro ?? []}
         actividad={actividad ?? []}
         todosProveedores={todosProveedores ?? []}
+        accesos={accesos ?? []}
+        establecimientos={establecimientos ?? []}
       />
     </div>
   )
