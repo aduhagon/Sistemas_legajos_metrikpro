@@ -11,6 +11,14 @@ export default async function AdminRubrosPage() {
     .from('usuarios').select('rol').eq('id', user.id).single()
   if (usuario?.rol !== 'admin') redirect('/dashboard')
 
+  // Documentos generales (rubro_id = null)
+  const { data: docsGenerales } = await supabase
+    .from('documentos_requeridos')
+    .select('id, codigo, nombre, tipo_vigencia, obligatorio, aplica_persona_fisica, aplica_persona_juridica, activo')
+    .is('rubro_id', null)
+    .order('codigo')
+
+  // Rubros con sus documentos específicos
   const { data: rubros } = await supabase
     .from('rubros')
     .select(`
@@ -28,7 +36,7 @@ export default async function AdminRubrosPage() {
         <h1 className="text-xl font-medium">Rubros y documentos</h1>
         <p className="text-zinc-500 text-sm">Configurá los rubros y los documentos requeridos por cada uno</p>
       </div>
-      <RubrosAdmin rubros={rubros ?? []} />
+      <RubrosAdmin rubros={rubros ?? []} docsGenerales={docsGenerales ?? []} />
     </div>
   )
 }
