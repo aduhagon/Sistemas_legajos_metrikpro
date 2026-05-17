@@ -33,6 +33,8 @@ export async function middleware(request: NextRequest) {
     '/registro',
     '/qr',
     '/proveedor',
+    '/acceso',
+    '/entrada',
   ]
   const esPublica = rutasPublicas.some(p => pathname.startsWith(p))
 

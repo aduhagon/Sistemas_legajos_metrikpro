@@ -23,7 +23,8 @@ export default function Navbar({ nombre, rol }: Props) {
     { href: '/dashboard',                label: 'Inicio',        roles: ['admin', 'evaluador', 'operador_acceso'] },
     { href: '/dashboard/legajos',        label: 'Legajos',       roles: ['admin', 'evaluador'] },
     { href: '/dashboard/configuracion',  label: 'Configuración', roles: ['admin'] },
-    { href: '/dashboard/admin/rubros',   label: 'Rubros y docs',  roles: ['admin'] },
+    { href: '/dashboard/admin/rubros',          label: 'Rubros y docs',    roles: ['admin'] },
+    { href: '/dashboard/admin/establecimientos', label: 'Establecimientos', roles: ['admin'] },
     { href: '/dashboard/reportes',       label: 'Reportes',       roles: ['admin', 'evaluador'] },
   ]
 
