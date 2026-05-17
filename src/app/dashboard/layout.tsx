@@ -7,11 +7,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
+  // Obtener datos del usuario — si falla RLS usamos el email como fallback
   const { data: usuario } = await supabase
     .from('usuarios')
     .select('nombre, email, rol')
     .eq('id', user.id)
-    .single()
+    .maybeSingle()
 
   const nombre = usuario?.nombre ?? user.email ?? 'Usuario'
   const rol = usuario?.rol ?? 'admin'
