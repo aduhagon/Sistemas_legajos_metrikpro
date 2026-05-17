@@ -46,7 +46,7 @@ export default async function AdminEstablecimientosPage() {
         <p className="text-zinc-500 text-sm">Configurá los establecimientos, sus rubros habilitados y el modo de control de acceso</p>
       </div>
       <EstablecimientosAdmin
-        establecimientos={establecimientos ?? []}
+        establecimientos={(establecimientos ?? []) as any[]}
         tipos={tipos ?? []}
         rubros={rubros ?? []}
         grupoId={grupo?.id ?? ''}
