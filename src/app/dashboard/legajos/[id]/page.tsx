@@ -9,6 +9,7 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
+  // Query sin historial primero — más segura
   const { data: proveedor } = await supabase
     .from('proveedores')
     .select(`
@@ -17,17 +18,27 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
       documentos_legajo(
         id, estado, fecha_venc, observaciones, archivo_url,
         fecha_presentacion, fecha_revision, updated_at,
-        documentos_requeridos(codigo, nombre, tipo_vigencia, obligatorio),
-        documentos_legajo_historial(
-          id, estado_anterior, estado_nuevo, actor_tipo, observaciones, archivo_url, created_at,
-          usuarios(nombre, email)
-        )
+        documentos_requeridos(codigo, nombre, tipo_vigencia, obligatorio)
       )
     `)
     .eq('id', params.id)
-    .single()
+    .maybeSingle()
 
   if (!proveedor) redirect('/dashboard/legajos')
+
+  // Historial por separado — si falla no rompe la página
+  const { data: historialData } = await supabase
+    .from('documentos_legajo_historial')
+    .select('id, documento_id, estado_anterior, estado_nuevo, actor_tipo, observaciones, created_at')
+    .in('documento_id', (proveedor.documentos_legajo as any[]).map((d: any) => d.id))
+    .order('created_at', { ascending: true })
+
+  // Agrupar historial por documento_id
+  const historialPorDoc: Record<string, any[]> = {}
+  for (const h of historialData ?? []) {
+    if (!historialPorDoc[h.documento_id]) historialPorDoc[h.documento_id] = []
+    historialPorDoc[h.documento_id].push(h)
+  }
 
   const docs = (proveedor.documentos_legajo as any[]) ?? []
   const docsAprobados = docs.filter(d => d.estado === 'APROBADO').length
@@ -128,8 +139,7 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
         <div className="divide-y divide-white/[0.04]">
           {docs.map((doc: any) => {
             const dr = doc.documentos_requeridos
-            const historial = (doc.documentos_legajo_historial as any[] ?? [])
-              .sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+            const historial = historialPorDoc[doc.id] ?? []
             const colorClass = estadoDocColor[doc.estado] ?? estadoDocColor.PENDIENTE
 
             return (
@@ -157,7 +167,7 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
                   </div>
                 </div>
 
-                {/* Timestamps de trazabilidad */}
+                {/* Timestamps */}
                 <div className="flex items-center gap-4 mb-2 flex-wrap">
                   {doc.fecha_presentacion && (
                     <div className="flex items-center gap-1.5">
@@ -196,12 +206,12 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
                   <p className="text-orange-400 text-xs italic mb-2">"{doc.observaciones}"</p>
                 )}
 
-                {/* Historial de estados */}
+                {/* Historial */}
                 {historial.length > 0 && (
-                  <div className="mt-3 pl-3 border-l border-white/[0.06] space-y-1.5">
+                  <div className="mt-2 pl-3 border-l border-white/[0.06] space-y-1.5">
                     {historial.map((h: any) => (
-                      <div key={h.id} className="flex items-center gap-2 text-xs">
-                        <span className={`px-1.5 py-0.5 rounded text-xs ${actorColor[h.actor_tipo] ?? actorColor.sistema}`}>
+                      <div key={h.id} className="flex items-center gap-2 text-xs flex-wrap">
+                        <span className={`px-1.5 py-0.5 rounded ${actorColor[h.actor_tipo] ?? actorColor.sistema}`}>
                           {h.actor_tipo}
                         </span>
                         <span className="text-zinc-600">
@@ -219,7 +229,7 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
                   </div>
                 )}
 
-                {/* Acciones del evaluador */}
+                {/* Acciones */}
                 <AccionesDocumento
                   docId={doc.id}
                   estado={doc.estado}
