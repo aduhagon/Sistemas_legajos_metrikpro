@@ -147,11 +147,15 @@ export default function PortalDocumentosPage() {
       const buffer = await file.arrayBuffer()
       const hashBuffer = await crypto.subtle.digest('SHA-256', buffer)
       const hash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('')
-      await supabase.from('documentos_legajo').update({
-        archivo_url: urlData?.signedUrl ?? path, hash_sha256: hash,
-        estado: 'CARGADO', fecha_venc: fechas[docId] || null,
-        updated_at: new Date().toISOString(),
-      }).eq('id', docId)
+
+      // Usar función con trazabilidad completa
+      const { error: rpcError } = await supabase.rpc('registrar_presentacion_documento', {
+        p_doc_id:      docId,
+        p_archivo_url: urlData?.signedUrl ?? path,
+        p_hash_sha256: hash,
+        p_fecha_venc:  fechas[docId] || null,
+      })
+      if (rpcError) throw new Error(rpcError.message)
       setDocs(prev => prev.map(d => d.id === docId
         ? { ...d, estado: 'CARGADO', archivo_url: urlData?.signedUrl ?? path, fecha_venc: fechas[docId] || null }
         : d))
