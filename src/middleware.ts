@@ -1,8 +1,9 @@
-import { createServerClient, type CookieOptions } from '@supabase/ssr'
-import { NextResponse, type NextRequest } from 'next/server'
+import { createServerClient } from '@supabase/ssr'
+import { NextResponse } from 'next/server'
+import type { NextRequest } from 'next/server'
 
 export async function middleware(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request })
+  let response = NextResponse.next({ request: { headers: request.headers } })
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -10,47 +11,48 @@ export async function middleware(request: NextRequest) {
     {
       cookies: {
         getAll() { return request.cookies.getAll() },
-        setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
+        setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
-          supabaseResponse = NextResponse.next({ request })
+          response = NextResponse.next({ request: { headers: request.headers } })
           cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          )
+            response.cookies.set(name, value, options))
         },
       },
     }
   )
 
   const { data: { user } } = await supabase.auth.getUser()
-  const pathname = request.nextUrl.pathname
 
-  // Rutas públicas — no requieren autenticación
+  const path = request.nextUrl.pathname
+
+  // Rutas públicas — no requieren auth
   const rutasPublicas = [
     '/login',
-    '/activar',
-    '/cambiar-password',
-    '/auth',
     '/registro',
     '/qr',
-    '/proveedor',
     '/acceso',
     '/entrada',
+    '/proveedor/login',
+    '/proveedor/registro',
+    '/proveedor/cambiar-password',
+    '/auth',
   ]
-  const esPublica = rutasPublicas.some(p => pathname.startsWith(p))
 
-  // Sin sesión y ruta privada → redirigir a login
-  if (!user && !esPublica) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/login'
-    return NextResponse.redirect(url)
+  const esPublica = rutasPublicas.some(r => path.startsWith(r))
+
+  // Dashboard requiere usuario interno (tabla usuarios)
+  if (path.startsWith('/dashboard') && !user) {
+    return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  // NO redirigir si ya tiene sesión — dejar que cada página lo maneje
-  return supabaseResponse
+  // Portal del proveedor requiere auth de Supabase
+  if (path.startsWith('/proveedor/portal') && !user) {
+    return NextResponse.redirect(new URL('/proveedor/login', request.url))
+  }
+
+  return response
 }
 
 export const config = {
-  matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
-  ],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
 }
