@@ -2,10 +2,8 @@
 
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase-client'
-import { useRouter } from 'next/navigation'
 
 export default function ProveedorLoginPage() {
-  const router = useRouter()
   const [modo, setModo] = useState<'login' | 'recuperar'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -19,24 +17,22 @@ export default function ProveedorLoginPage() {
     setLoading(true)
     setError('')
 
-    const { error: err } = await supabase.auth.signInWithPassword({ email, password })
+    // Login via API route del servidor para que las cookies se establezcan correctamente
+    const res = await fetch('/api/proveedor/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    })
 
-    if (err) {
-      setError('Email o contraseña incorrectos')
+    const data = await res.json()
+
+    if (!res.ok) {
+      setError(data.error ?? 'Error al ingresar')
       setLoading(false)
       return
     }
 
-    // Verificar que es un usuario proveedor
-    const { data: miProv } = await supabase.rpc('get_mi_proveedor')
-
-    if (!miProv) {
-      await supabase.auth.signOut()
-      setError('Esta cuenta no está asociada a ningún proveedor')
-      setLoading(false)
-      return
-    }
-
+    // Redirigir con recarga completa para que el middleware lea las cookies
     window.location.href = '/proveedor/portal'
   }
 
@@ -44,11 +40,9 @@ export default function ProveedorLoginPage() {
     e.preventDefault()
     setLoading(true)
     setError('')
-
     const { error: err } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/proveedor/cambiar-password`,
+      redirectTo: `${window.location.origin}/auth/proveedor-callback?type=recovery`,
     })
-
     if (err) {
       setError('Error al enviar el email. Verificá que el email sea correcto.')
     } else {
@@ -56,6 +50,8 @@ export default function ProveedorLoginPage() {
     }
     setLoading(false)
   }
+
+  const inputCls = "w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-4 py-2.5 text-white placeholder:text-zinc-600 text-sm focus:outline-none focus:border-blue-500/60 transition-all"
 
   return (
     <div className="min-h-screen bg-[#0f1117] flex items-center justify-center p-4">
@@ -83,17 +79,21 @@ export default function ProveedorLoginPage() {
               <form onSubmit={handleLogin} className="space-y-4">
                 <div>
                   <label className="block text-zinc-400 text-sm mb-1.5">Email</label>
-                  <input type="email" value={email} onChange={e => setEmail(e.target.value)} required
-                    placeholder="tu@email.com"
-                    className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-4 py-2.5 text-white placeholder:text-zinc-600 text-sm focus:outline-none focus:border-blue-500/60 transition-all"/>
+                  <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+                    required placeholder="tu@email.com" className={inputCls}/>
                 </div>
                 <div>
-                  <label className="block text-zinc-400 text-sm mb-1.5">Contraseña</label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-zinc-400 text-sm">Contraseña</label>
+                    <button type="button" onClick={() => { setModo('recuperar'); setError('') }}
+                      className="text-zinc-500 hover:text-zinc-300 text-xs transition-colors">
+                      ¿Olvidaste tu contraseña?
+                    </button>
+                  </div>
                   <div className="relative">
                     <input type={showPass ? 'text' : 'password'} value={password}
                       onChange={e => setPassword(e.target.value)} required
-                      placeholder="••••••••"
-                      className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-4 py-2.5 text-white placeholder:text-zinc-600 text-sm focus:outline-none focus:border-blue-500/60 transition-all pr-10"/>
+                      placeholder="••••••••" className={inputCls + ' pr-10'}/>
                     <button type="button" onClick={() => setShowPass(!showPass)}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -111,13 +111,8 @@ export default function ProveedorLoginPage() {
                   {loading ? 'Ingresando...' : 'Ingresar'}
                 </button>
               </form>
-              <div className="mt-4 flex items-center justify-between text-xs">
-                <button onClick={() => { setModo('recuperar'); setError('') }}
-                  className="text-zinc-500 hover:text-zinc-300 transition-colors">
-                  ¿Olvidaste tu contraseña?
-                </button>
-                <a href="/proveedor/registro"
-                  className="text-blue-400 hover:text-blue-300 transition-colors">
+              <div className="mt-4 text-center">
+                <a href="/proveedor/registro" className="text-blue-400 hover:text-blue-300 text-xs transition-colors">
                   Registrarse →
                 </a>
               </div>
@@ -125,18 +120,18 @@ export default function ProveedorLoginPage() {
           ) : (
             <>
               <h1 className="text-white font-medium text-xl mb-2">Recuperar contraseña</h1>
-              <p className="text-zinc-500 text-sm mb-6">Te enviamos un link a tu email para restablecer tu contraseña.</p>
+              <p className="text-zinc-500 text-sm mb-6">Te enviamos un link a tu email.</p>
               {mensaje ? (
-                <div className="bg-green-500/10 border border-green-500/20 rounded-lg px-4 py-3">
+                <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-4">
                   <p className="text-green-400 text-sm">{mensaje}</p>
+                  <p className="text-zinc-500 text-xs mt-2">Revisá también la carpeta de spam.</p>
                 </div>
               ) : (
                 <form onSubmit={handleRecuperar} className="space-y-4">
                   <div>
                     <label className="block text-zinc-400 text-sm mb-1.5">Email</label>
-                    <input type="email" value={email} onChange={e => setEmail(e.target.value)} required
-                      placeholder="tu@email.com"
-                      className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-4 py-2.5 text-white placeholder:text-zinc-600 text-sm focus:outline-none focus:border-blue-500/60 transition-all"/>
+                    <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+                      required placeholder="tu@email.com" className={inputCls}/>
                   </div>
                   {error && <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2"><span className="text-red-400 text-sm">{error}</span></div>}
                   <button type="submit" disabled={loading}
