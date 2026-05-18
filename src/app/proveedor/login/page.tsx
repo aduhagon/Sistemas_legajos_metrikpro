@@ -37,8 +37,7 @@ export default function ProveedorLoginPage() {
       return
     }
 
-    router.push('/proveedor/portal')
-    router.refresh()
+    window.location.href = '/proveedor/portal'
   }
 
   async function handleRecuperar(e: React.FormEvent) {
