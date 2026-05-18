@@ -24,20 +24,13 @@ export async function middleware(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   const path = request.nextUrl.pathname
 
+  // Solo proteger el dashboard interno
   if (path.startsWith('/dashboard') && !user) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  // Para el portal del proveedor — si no hay sesión en cookies, 
-  // dejar pasar igual y que el portal maneje la redirección al login
-  // Esto evita el loop cuando el cliente tiene sesión en localStorage pero no en cookies
-  if (path.startsWith('/proveedor/portal') && !user) {
-    // Redirigir al login solo si viene sin ningún token
-    const hasToken = request.cookies.getAll().some(c => c.name.includes('auth-token') || c.name.includes('sb-'))
-    if (!hasToken) {
-      return NextResponse.redirect(new URL('/proveedor/login', request.url))
-    }
-  }
+  // El portal del proveedor se protege desde el componente, no desde el middleware
+  // Esto evita loops de redirección cuando el cliente tiene sesión en cookies del browser
 
   return response
 }
