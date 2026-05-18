@@ -33,15 +33,7 @@ export default function ProveedorPortalPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.push('/proveedor/login'); return }
 
-    // Si viene del callback de confirmación de email, completar el registro
-    const params = new URLSearchParams(window.location.search)
-    if (params.get('nuevo') === '1') {
-      try {
-        await supabase.rpc('completar_registro_proveedor', { p_user_id: user.id })
-      } catch (e) {
-        console.error('Error completando registro:', e)
-      }
-    }
+    // El registro se completa en el callback del servidor — nada que hacer aquí
 
     const { data: miProv } = await supabase.rpc('get_mi_proveedor')
     if (!miProv) { router.push('/proveedor/login'); return }
