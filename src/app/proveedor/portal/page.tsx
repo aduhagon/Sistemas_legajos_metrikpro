@@ -35,9 +35,17 @@ export default function ProveedorPortalPage() {
 
     // El registro se completa en el callback del servidor — nada que hacer aquí
 
-    const { data: miProv } = await supabase.rpc('get_mi_proveedor')
-    if (!miProv) { router.push('/proveedor/login'); return }
+    // Buscar el proveedor vinculado al usuario directamente
+    const { data: miProvData } = await supabase
+      .from('proveedores_usuarios')
+      .select('proveedor_id, rol, activo')
+      .eq('user_id', user.id)
+      .eq('activo', true)
+      .single()
 
+    if (!miProvData) { router.push('/proveedor/login'); return }
+
+    const miProv = { proveedor_id: miProvData.proveedor_id, rol: miProvData.rol }
     setMiRol(miProv.rol)
 
     const { data: provData } = await supabase
