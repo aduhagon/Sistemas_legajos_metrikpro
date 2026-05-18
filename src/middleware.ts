@@ -22,30 +22,27 @@ export async function middleware(request: NextRequest) {
   )
 
   const { data: { user } } = await supabase.auth.getUser()
-
   const path = request.nextUrl.pathname
 
-  // Rutas públicas — no requieren auth
   const rutasPublicas = [
     '/login',
     '/registro',
     '/qr',
     '/acceso',
     '/entrada',
+    '/auth',
     '/proveedor/login',
     '/proveedor/registro',
     '/proveedor/cambiar-password',
-    '/auth',
+    '/cambiar-password',
   ]
 
   const esPublica = rutasPublicas.some(r => path.startsWith(r))
 
-  // Dashboard requiere usuario interno (tabla usuarios)
   if (path.startsWith('/dashboard') && !user) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  // Portal del proveedor requiere auth de Supabase
   if (path.startsWith('/proveedor/portal') && !user) {
     return NextResponse.redirect(new URL('/proveedor/login', request.url))
   }
