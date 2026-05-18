@@ -17,23 +17,25 @@ export default function ProveedorLoginPage() {
     setLoading(true)
     setError('')
 
-    // Login via API route del servidor para que las cookies se establezcan correctamente
-    const res = await fetch('/api/proveedor/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    })
+    const { data, error: err } = await supabase.auth.signInWithPassword({ email, password })
 
-    const data = await res.json()
-
-    if (!res.ok) {
-      setError(data.error ?? 'Error al ingresar')
+    if (err || !data.user) {
+      setError('Email o contraseña incorrectos')
       setLoading(false)
       return
     }
 
-    // Redirigir con recarga completa para que el middleware lea las cookies
-    window.location.href = '/proveedor/portal'
+    // Verificar que es proveedor
+    const { data: miProv } = await supabase.rpc('get_mi_proveedor')
+    if (!miProv) {
+      await supabase.auth.signOut()
+      setError('Esta cuenta no está asociada a ningún proveedor')
+      setLoading(false)
+      return
+    }
+
+    // Forzar recarga completa para que las cookies se propaguen al middleware
+    window.location.replace('/proveedor/portal')
   }
 
   async function handleRecuperar(e: React.FormEvent) {
@@ -44,9 +46,9 @@ export default function ProveedorLoginPage() {
       redirectTo: `${window.location.origin}/auth/proveedor-callback?type=recovery`,
     })
     if (err) {
-      setError('Error al enviar el email. Verificá que el email sea correcto.')
+      setError('Error al enviar el email.')
     } else {
-      setMensaje('Te enviamos un link para restablecer tu contraseña. Revisá tu email.')
+      setMensaje('Te enviamos un link para restablecer tu contraseña.')
     }
     setLoading(false)
   }
