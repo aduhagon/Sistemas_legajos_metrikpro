@@ -35,7 +35,7 @@ export default function ProveedorRegistroPage() {
     setLoading(true)
     setError('')
 
-    // Guardar datos de la empresa temporalmente para usarlos después de confirmar email
+    // Guardar datos de la empresa en la base de datos hasta que confirme el email
     const datosRegistro = {
       razon_social:       empresa.razon_social,
       cuit:               empresa.cuit.replace(/[-\s]/g, ''),
@@ -47,8 +47,10 @@ export default function ProveedorRegistroPage() {
       nombre:             cuenta.nombre,
     }
 
-    // Guardar en sessionStorage (se limpia cuando cierra el tab)
-    sessionStorage.setItem('registro_proveedor_pendiente', JSON.stringify(datosRegistro))
+    await supabase.rpc('guardar_registro_pendiente', {
+      p_email: cuenta.email,
+      p_datos: datosRegistro,
+    })
 
     // Crear cuenta en Supabase Auth — manda email de confirmación
     const { error: authError } = await supabase.auth.signUp({
