@@ -25,16 +25,22 @@ export default function ProveedorLoginPage() {
       return
     }
 
-    // Verificar que es proveedor
-    const { data: miProv } = await supabase.rpc('get_mi_proveedor')
-    if (!miProv) {
+    // Verificar que es proveedor — query directa sin RPC
+    const { data: puData, error: puErr } = await supabase
+      .from('proveedores_usuarios')
+      .select('proveedor_id, rol')
+      .eq('user_id', data.user.id)
+      .eq('activo', true)
+      .maybeSingle()
+
+    if (puErr || !puData) {
       await supabase.auth.signOut()
       setError('Esta cuenta no está asociada a ningún proveedor')
       setLoading(false)
       return
     }
 
-    // Forzar recarga completa para que las cookies se propaguen al middleware
+    // Redirigir con recarga completa
     window.location.replace('/proveedor/portal')
   }
 
