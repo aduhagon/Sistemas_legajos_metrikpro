@@ -21,8 +21,6 @@ export default function ProveedorPortalPage() {
   const [subiendo, setSubiendo] = useState<string | null>(null)
   const [uploadOk, setUploadOk] = useState<string | null>(null)
   const [error, setError] = useState('')
-
-  // Operarios
   const [nuevoOperario, setNuevoOperario] = useState({ email: '', nombre: '' })
   const [agregandoOp, setAgregandoOp] = useState(false)
   const [loadingOp, setLoadingOp] = useState(false)
@@ -30,57 +28,61 @@ export default function ProveedorPortalPage() {
   useEffect(() => { cargarDatos() }, [])
 
   async function cargarDatos() {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { router.push('/proveedor/login'); return }
+    // Usar getSession() en lugar de getUser() — lee la sesión local sin llamada al servidor
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) {
+      window.location.replace('/proveedor/login')
+      return
+    }
 
-    // El registro se completa en el callback del servidor — nada que hacer aquí
+    const user = session.user
 
-    // Buscar el proveedor vinculado al usuario directamente
-    const { data: miProvData } = await supabase
-      .from('proveedores_usuarios')
-      .select('proveedor_id, rol, activo')
-      .eq('user_id', user.id)
-      .eq('activo', true)
-      .single()
+    // Verificar proveedor usando función SECURITY DEFINER
+    const { data: provVerif } = await supabase
+      .rpc('verificar_proveedor_usuario', { p_user_id: user.id })
 
-    if (!miProvData) { router.push('/proveedor/login'); return }
+    if (!provVerif) {
+      await supabase.auth.signOut()
+      window.location.replace('/proveedor/login')
+      return
+    }
 
-    const miProv = { proveedor_id: miProvData.proveedor_id, rol: miProvData.rol }
-    setMiRol(miProv.rol)
+    setMiRol(provVerif.rol)
 
     const { data: provData } = await supabase
       .from('proveedores')
       .select('id, razon_social, cuit, estado, email, telefono, notif_vencimientos, rubros(nombre), created_at')
-      .eq('id', miProv.proveedor_id)
+      .eq('id', provVerif.proveedor_id)
       .single()
 
-    if (!provData) { router.push('/proveedor/login'); return }
+    if (!provData) {
+      window.location.replace('/proveedor/login')
+      return
+    }
     setProveedor(provData)
 
-    // Si es operario solo carga el QR
-    if (miProv.rol === 'operario') {
+    if (provVerif.rol === 'operario') {
       const { data: habData } = await supabase
         .from('habilitaciones').select('id, qr_token, estado, fecha_venc')
-        .eq('proveedor_id', miProv.proveedor_id).eq('estado', 'VIGENTE').single()
+        .eq('proveedor_id', provVerif.proveedor_id).eq('estado', 'VIGENTE').single()
       if (habData) setHabilitacion(habData)
       setLoading(false)
       return
     }
 
-    // Titular — carga todo
     const [
       { data: habData },
       { data: docsData },
       { data: opData },
     ] = await Promise.all([
       supabase.from('habilitaciones').select('id, qr_token, estado, fecha_venc')
-        .eq('proveedor_id', miProv.proveedor_id).eq('estado', 'VIGENTE').single(),
+        .eq('proveedor_id', provVerif.proveedor_id).eq('estado', 'VIGENTE').single(),
       supabase.from('documentos_legajo')
         .select('id, estado, fecha_venc, archivo_url, observaciones, documentos_requeridos(codigo, nombre, tipo_vigencia, obligatorio)')
-        .eq('proveedor_id', miProv.proveedor_id),
+        .eq('proveedor_id', provVerif.proveedor_id),
       supabase.from('proveedores_usuarios')
         .select('id, rol, nombre, activo, user_id')
-        .eq('proveedor_id', miProv.proveedor_id),
+        .eq('proveedor_id', provVerif.proveedor_id),
     ])
 
     if (habData) {
@@ -102,7 +104,7 @@ export default function ProveedorPortalPage() {
 
   async function handleLogout() {
     await supabase.auth.signOut()
-    router.push('/proveedor/login')
+    window.location.replace('/proveedor/login')
   }
 
   async function handleUpload(docId: string, file: File) {
@@ -144,34 +146,27 @@ export default function ProveedorPortalPage() {
     e.preventDefault()
     setLoadingOp(true)
     setError('')
-
-    // Crear cuenta en Supabase Auth para el operario
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email: nuevoOperario.email,
-      password: Math.random().toString(36).slice(-10) + 'Aa1!', // password temporal
+      password: Math.random().toString(36).slice(-10) + 'Aa1!',
       options: { data: { nombre: nuevoOperario.nombre } }
     })
-
     if (authError || !authData.user) {
       setError(authError?.message ?? 'Error al crear la cuenta del operario')
       setLoadingOp(false)
       return
     }
-
-    // Vincular como operario
     const { error: vinErr } = await supabase.from('proveedores_usuarios').insert({
       proveedor_id: proveedor.id,
       user_id: authData.user.id,
       rol: 'operario',
       nombre: nuevoOperario.nombre,
     })
-
     if (vinErr) {
       setError('Error al agregar el operario')
       setLoadingOp(false)
       return
     }
-
     setOperarios(prev => [...prev, { id: authData.user!.id, rol: 'operario', nombre: nuevoOperario.nombre, activo: true }])
     setNuevoOperario({ email: '', nombre: '' })
     setAgregandoOp(false)
@@ -209,7 +204,6 @@ export default function ProveedorPortalPage() {
     </div>
   )
 
-  // ── VISTA OPERARIO — solo QR ──
   if (miRol === 'operario') {
     return (
       <div className="min-h-screen bg-[#0f1117] text-white flex flex-col">
@@ -256,7 +250,6 @@ export default function ProveedorPortalPage() {
     )
   }
 
-  // ── VISTA TITULAR — completa ──
   const docsConProblemas = docs.filter(d => ['RECHAZADO', 'VENCIDO'].includes(d.estado)).length
   const docsCompletos = docs.filter(d => ['CARGADO', 'APROBADO'].includes(d.estado)).length
 
@@ -277,8 +270,7 @@ export default function ProveedorPortalPage() {
           </div>
           <div className="flex items-center gap-3">
             <span className="text-zinc-500 text-xs hidden sm:inline truncate max-w-32">{proveedor?.razon_social}</span>
-            <button onClick={handleLogout}
-              className="text-zinc-600 hover:text-zinc-300 text-xs transition-colors flex items-center gap-1">
+            <button onClick={handleLogout} className="text-zinc-600 hover:text-zinc-300 text-xs transition-colors flex items-center gap-1">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
                 <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
@@ -290,8 +282,6 @@ export default function ProveedorPortalPage() {
       </nav>
 
       <div className="max-w-lg mx-auto px-4 py-6">
-
-        {/* ── QR Principal ── */}
         {vista === 'qr' && habilitacion && (
           <div className="flex flex-col items-center">
             <div className="flex items-center gap-2 mb-6">
@@ -324,10 +314,8 @@ export default function ProveedorPortalPage() {
           </div>
         )}
 
-        {/* ── Vistas secundarias ── */}
         {vista !== 'qr' && (
           <>
-            {/* Card resumen */}
             <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-5 mb-4">
               <div className="flex items-start justify-between mb-3">
                 <div>
@@ -351,7 +339,6 @@ export default function ProveedorPortalPage() {
               </div>
             </div>
 
-            {/* Tabs */}
             <div className="flex gap-1 mb-4 bg-white/[0.03] border border-white/[0.06] rounded-xl p-1">
               {habilitacion && (
                 <button onClick={() => setVista('qr')}
@@ -372,7 +359,6 @@ export default function ProveedorPortalPage() {
               ))}
             </div>
 
-            {/* ── DOCUMENTOS ── */}
             {vista === 'docs' && (
               <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
                 <div className="px-5 py-4 border-b border-white/[0.06]">
@@ -441,92 +427,84 @@ export default function ProveedorPortalPage() {
               </div>
             )}
 
-            {/* ── OPERARIOS ── */}
             {vista === 'operarios' && (
-              <div className="space-y-3">
-                <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
-                  <div className="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between">
-                    <div>
-                      <h3 className="text-sm font-medium">Equipo con acceso al QR</h3>
-                      <p className="text-zinc-500 text-xs mt-0.5">Los operarios solo pueden ver el carnet QR</p>
-                    </div>
-                    <button onClick={() => setAgregandoOp(true)}
-                      className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-                      </svg>
-                      Agregar
-                    </button>
+              <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
+                <div className="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-medium">Equipo con acceso al QR</h3>
+                    <p className="text-zinc-500 text-xs mt-0.5">Los operarios solo pueden ver el carnet QR</p>
                   </div>
-
-                  {/* Form nuevo operario */}
-                  {agregandoOp && (
-                    <div className="px-5 py-4 border-b border-white/[0.06] bg-blue-500/5">
-                      <form onSubmit={invitarOperario} className="space-y-3">
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-zinc-400 text-xs mb-1">Nombre</label>
-                            <input value={nuevoOperario.nombre}
-                              onChange={e => setNuevoOperario(o => ({ ...o, nombre: e.target.value }))}
-                              required placeholder="Juan García"
-                              className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500/60 transition-all"/>
-                          </div>
-                          <div>
-                            <label className="block text-zinc-400 text-xs mb-1">Email</label>
-                            <input type="email" value={nuevoOperario.email}
-                              onChange={e => setNuevoOperario(o => ({ ...o, email: e.target.value }))}
-                              required placeholder="juan@email.com"
-                              className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500/60 transition-all"/>
-                          </div>
+                  <button onClick={() => setAgregandoOp(true)}
+                    className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                    </svg>
+                    Agregar
+                  </button>
+                </div>
+                {agregandoOp && (
+                  <div className="px-5 py-4 border-b border-white/[0.06] bg-blue-500/5">
+                    <form onSubmit={invitarOperario} className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-zinc-400 text-xs mb-1">Nombre</label>
+                          <input value={nuevoOperario.nombre}
+                            onChange={e => setNuevoOperario(o => ({ ...o, nombre: e.target.value }))}
+                            required placeholder="Juan García"
+                            className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500/60 transition-all"/>
                         </div>
-                        {error && <p className="text-red-400 text-xs">{error}</p>}
-                        <div className="flex gap-2">
-                          <button type="submit" disabled={loadingOp}
-                            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs px-4 py-2 rounded-lg transition-colors">
-                            {loadingOp ? 'Agregando...' : 'Agregar operario'}
-                          </button>
-                          <button type="button" onClick={() => { setAgregandoOp(false); setError('') }}
-                            className="text-zinc-500 hover:text-zinc-300 text-xs transition-colors px-3">
-                            Cancelar
-                          </button>
+                        <div>
+                          <label className="block text-zinc-400 text-xs mb-1">Email</label>
+                          <input type="email" value={nuevoOperario.email}
+                            onChange={e => setNuevoOperario(o => ({ ...o, email: e.target.value }))}
+                            required placeholder="juan@email.com"
+                            className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500/60 transition-all"/>
                         </div>
-                        <p className="text-zinc-600 text-xs">El operario recibirá un email para activar su cuenta y configurar su contraseña</p>
-                      </form>
+                      </div>
+                      {error && <p className="text-red-400 text-xs">{error}</p>}
+                      <div className="flex gap-2">
+                        <button type="submit" disabled={loadingOp}
+                          className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs px-4 py-2 rounded-lg transition-colors">
+                          {loadingOp ? 'Agregando...' : 'Agregar operario'}
+                        </button>
+                        <button type="button" onClick={() => { setAgregandoOp(false); setError('') }}
+                          className="text-zinc-500 hover:text-zinc-300 text-xs transition-colors px-3">
+                          Cancelar
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                )}
+                <div className="divide-y divide-white/[0.04]">
+                  {operarios.map((op: any) => (
+                    <div key={op.id} className={`px-5 py-3 flex items-center justify-between ${!op.activo ? 'opacity-50' : ''}`}>
+                      <div>
+                        <p className="text-white text-sm">{op.nombre ?? 'Sin nombre'}</p>
+                        <span className={`text-xs px-2 py-0.5 rounded-full border ${op.rol === 'titular' ? colorClass('blue') : colorClass('zinc')}`}>
+                          {op.rol === 'titular' ? 'Titular' : 'Operario'}
+                        </span>
+                      </div>
+                      {op.rol !== 'titular' && (
+                        <button onClick={() => toggleOperario(op.id, op.activo)}
+                          className={`text-xs px-2.5 py-1 rounded-full border transition-all ${
+                            op.activo
+                              ? 'bg-green-500/10 text-green-400 border-green-500/20 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20'
+                              : 'bg-zinc-500/10 text-zinc-500 border-zinc-500/20 hover:bg-green-500/10 hover:text-green-400 hover:border-green-500/20'
+                          }`}>
+                          {op.activo ? 'Activo' : 'Inactivo'}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {operarios.length === 0 && (
+                    <div className="px-5 py-6 text-center">
+                      <p className="text-zinc-600 text-sm">Sin operarios agregados todavía</p>
                     </div>
                   )}
-
-                  <div className="divide-y divide-white/[0.04]">
-                    {operarios.map((op: any) => (
-                      <div key={op.id} className={`px-5 py-3 flex items-center justify-between ${!op.activo ? 'opacity-50' : ''}`}>
-                        <div>
-                          <p className="text-white text-sm">{op.nombre ?? 'Sin nombre'}</p>
-                          <span className={`text-xs px-2 py-0.5 rounded-full border ${op.rol === 'titular' ? colorClass('blue') : colorClass('zinc')}`}>
-                            {op.rol === 'titular' ? 'Titular' : 'Operario'}
-                          </span>
-                        </div>
-                        {op.rol !== 'titular' && (
-                          <button onClick={() => toggleOperario(op.id, op.activo)}
-                            className={`text-xs px-2.5 py-1 rounded-full border transition-all ${
-                              op.activo
-                                ? 'bg-green-500/10 text-green-400 border-green-500/20 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20'
-                                : 'bg-zinc-500/10 text-zinc-500 border-zinc-500/20 hover:bg-green-500/10 hover:text-green-400 hover:border-green-500/20'
-                            }`}>
-                            {op.activo ? 'Activo' : 'Inactivo'}
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                    {operarios.length === 0 && (
-                      <div className="px-5 py-6 text-center">
-                        <p className="text-zinc-600 text-sm">Sin operarios agregados todavía</p>
-                      </div>
-                    )}
-                  </div>
                 </div>
               </div>
             )}
 
-            {/* ── HISTORIAL ── */}
             {vista === 'historial' && (
               <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
                 <div className="px-5 py-4 border-b border-white/[0.06]">
@@ -572,7 +550,6 @@ export default function ProveedorPortalPage() {
               </div>
             )}
 
-            {/* ── PERFIL ── */}
             {vista === 'perfil' && (
               <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-5">
                 <h3 className="text-sm font-medium mb-4">Datos de la empresa</h3>
