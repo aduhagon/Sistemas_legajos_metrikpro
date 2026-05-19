@@ -2,10 +2,8 @@
 
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase-client'
-import { useRouter } from 'next/navigation'
 
 export default function CambiarPasswordProveedorPage() {
-  const router = useRouter()
   const [password, setPassword] = useState('')
   const [passwordConfirm, setPasswordConfirm] = useState('')
   const [loading, setLoading] = useState(false)
@@ -25,7 +23,10 @@ export default function CambiarPasswordProveedorPage() {
       setLoading(false)
       return
     }
-    router.push('/proveedor/portal')
+
+    // Cerrar sesión y redirigir al login para que ingresen con la nueva contraseña
+    await supabase.auth.signOut()
+    window.location.replace('/proveedor/login?msg=password_actualizado')
   }
 
   const inputCls = "w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-4 py-2.5 text-white placeholder:text-zinc-600 text-sm focus:outline-none focus:border-blue-500/60 transition-all"
@@ -56,7 +57,7 @@ export default function CambiarPasswordProveedorPage() {
             </svg>
           </div>
           <h1 className="text-white font-medium text-xl mb-1">Nueva contraseña</h1>
-          <p className="text-zinc-500 text-sm mb-6">Elegí una contraseña segura para tu cuenta.</p>
+          <p className="text-zinc-500 text-sm mb-6">Elegí una contraseña segura. Después vas a poder ingresar con ella.</p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
