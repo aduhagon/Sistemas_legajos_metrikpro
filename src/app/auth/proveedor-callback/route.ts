@@ -6,6 +6,7 @@ import { cookies } from 'next/headers'
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get('code')
+  const type = searchParams.get('type') // 'recovery' para reset de contraseña
 
   if (!code) {
     return NextResponse.redirect(`${origin}/proveedor/login?error=link_invalido`)
@@ -29,15 +30,18 @@ export async function GET(request: NextRequest) {
   const { data, error } = await supabase.auth.exchangeCodeForSession(code)
 
   if (error || !data.session) {
-    return NextResponse.redirect(`${origin}/proveedor/login?error=confirmacion_fallida`)
+    return NextResponse.redirect(`${origin}/proveedor/login?error=link_expirado`)
   }
 
-  // Completar el registro usando la función de DB
+  // Si es reset de contraseña → ir a cambiar password
+  if (type === 'recovery') {
+    return NextResponse.redirect(`${origin}/proveedor/cambiar-password`)
+  }
+
+  // Si es registro nuevo → completar el legajo y ir al portal
   await supabase.rpc('completar_registro_proveedor', {
     p_user_id: data.session.user.id
   })
 
-  // Redirigir al portal — ya tiene sesión activa
-  const response = NextResponse.redirect(`${origin}/proveedor/portal`)
-  return response
+  return NextResponse.redirect(`${origin}/proveedor/portal`)
 }
