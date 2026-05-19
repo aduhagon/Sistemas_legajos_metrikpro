@@ -2,13 +2,11 @@
 
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase-client'
-import { useRouter } from 'next/navigation'
 import { QRCodeSVG } from 'qrcode.react'
 
 type Vista = 'qr' | 'docs' | 'operarios' | 'historial' | 'perfil'
 
 export default function ProveedorPortalPage() {
-  const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [miRol, setMiRol] = useState<'titular' | 'operario' | null>(null)
   const [proveedor, setProveedor] = useState<any>(null)
@@ -25,21 +23,27 @@ export default function ProveedorPortalPage() {
   const [agregandoOp, setAgregandoOp] = useState(false)
   const [loadingOp, setLoadingOp] = useState(false)
 
-  useEffect(() => { cargarDatos() }, [])
+  useEffect(() => {
+    // Escuchar cambios de sesión — esto se dispara cuando el login termina
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+          if (session?.user) {
+            await cargarDatos(session.user.id)
+          } else {
+            window.location.replace('/proveedor/login')
+          }
+        } else if (event === 'SIGNED_OUT') {
+          window.location.replace('/proveedor/login')
+        }
+      }
+    )
+    return () => subscription.unsubscribe()
+  }, [])
 
-  async function cargarDatos() {
-    // Usar getSession() en lugar de getUser() — lee la sesión local sin llamada al servidor
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session?.user) {
-      window.location.replace('/proveedor/login')
-      return
-    }
-
-    const user = session.user
-
-    // Verificar proveedor usando función SECURITY DEFINER
+  async function cargarDatos(userId: string) {
     const { data: provVerif } = await supabase
-      .rpc('verificar_proveedor_usuario', { p_user_id: user.id })
+      .rpc('verificar_proveedor_usuario', { p_user_id: userId })
 
     if (!provVerif) {
       await supabase.auth.signOut()
@@ -70,11 +74,7 @@ export default function ProveedorPortalPage() {
       return
     }
 
-    const [
-      { data: habData },
-      { data: docsData },
-      { data: opData },
-    ] = await Promise.all([
+    const [{ data: habData }, { data: docsData }, { data: opData }] = await Promise.all([
       supabase.from('habilitaciones').select('id, qr_token, estado, fecha_venc')
         .eq('proveedor_id', provVerif.proveedor_id).eq('estado', 'VIGENTE').single(),
       supabase.from('documentos_legajo')
@@ -104,7 +104,6 @@ export default function ProveedorPortalPage() {
 
   async function handleLogout() {
     await supabase.auth.signOut()
-    window.location.replace('/proveedor/login')
   }
 
   async function handleUpload(docId: string, file: File) {
@@ -142,65 +141,31 @@ export default function ProveedorPortalPage() {
     }
   }
 
-  async function invitarOperario(e: React.FormEvent) {
-    e.preventDefault()
-    setLoadingOp(true)
-    setError('')
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: nuevoOperario.email,
-      password: Math.random().toString(36).slice(-10) + 'Aa1!',
-      options: { data: { nombre: nuevoOperario.nombre } }
-    })
-    if (authError || !authData.user) {
-      setError(authError?.message ?? 'Error al crear la cuenta del operario')
-      setLoadingOp(false)
-      return
-    }
-    const { error: vinErr } = await supabase.from('proveedores_usuarios').insert({
-      proveedor_id: proveedor.id,
-      user_id: authData.user.id,
-      rol: 'operario',
-      nombre: nuevoOperario.nombre,
-    })
-    if (vinErr) {
-      setError('Error al agregar el operario')
-      setLoadingOp(false)
-      return
-    }
-    setOperarios(prev => [...prev, { id: authData.user!.id, rol: 'operario', nombre: nuevoOperario.nombre, activo: true }])
-    setNuevoOperario({ email: '', nombre: '' })
-    setAgregandoOp(false)
-    setLoadingOp(false)
-  }
-
-  async function toggleOperario(opId: string, activo: boolean) {
-    await supabase.from('proveedores_usuarios').update({ activo: !activo }).eq('id', opId)
-    setOperarios(prev => prev.map(o => o.id === opId ? { ...o, activo: !activo } : o))
-  }
-
   const qrUrl = habilitacion
     ? `${typeof window !== 'undefined' ? window.location.origin : ''}/qr/${habilitacion.qr_token}`
     : ''
 
   const estadoDocCfg: Record<string, { label: string; color: string }> = {
-    PENDIENTE: { label: 'Pendiente', color: 'zinc'   },
-    CARGADO:   { label: 'Cargado',   color: 'blue'   },
-    APROBADO:  { label: 'Aprobado',  color: 'green'  },
-    RECHAZADO: { label: 'Rechazado', color: 'red'    },
+    PENDIENTE: { label: 'Pendiente', color: 'zinc' },
+    CARGADO:   { label: 'Cargado',   color: 'blue' },
+    APROBADO:  { label: 'Aprobado',  color: 'green' },
+    RECHAZADO: { label: 'Rechazado', color: 'red' },
     VENCIDO:   { label: 'Vencido',   color: 'orange' },
   }
 
   const colorClass = (color: string) =>
     color === 'green'  ? 'bg-green-500/10 text-green-400 border-green-500/20' :
     color === 'blue'   ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-    color === 'yellow' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
     color === 'red'    ? 'bg-red-500/10 text-red-400 border-red-500/20' :
     color === 'orange' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' :
     'bg-zinc-500/10 text-zinc-500 border-zinc-500/20'
 
   if (loading) return (
     <div className="min-h-screen bg-[#0f1117] flex items-center justify-center">
-      <div className="text-zinc-500 text-sm">Cargando...</div>
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"/>
+        <p className="text-zinc-500 text-sm">Cargando tu portal...</p>
+      </div>
     </div>
   )
 
@@ -220,13 +185,7 @@ export default function ProveedorPortalPage() {
               </div>
               <span className="font-medium text-sm">Sistema Legajos</span>
             </div>
-            <button onClick={handleLogout} className="text-zinc-600 hover:text-zinc-300 text-xs transition-colors flex items-center gap-1">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
-              </svg>
-              Salir
-            </button>
+            <button onClick={handleLogout} className="text-zinc-600 hover:text-zinc-300 text-xs transition-colors">Salir</button>
           </div>
         </nav>
         <div className="flex-1 flex flex-col items-center justify-center p-6">
@@ -240,10 +199,7 @@ export default function ProveedorPortalPage() {
               <p className="text-zinc-500 text-sm mt-1">Mostrá este QR al operador de acceso</p>
             </>
           ) : (
-            <div className="text-center">
-              <p className="text-zinc-400 text-lg mb-2">Sin habilitación vigente</p>
-              <p className="text-zinc-600 text-sm">Contactá al titular de la empresa para más información</p>
-            </div>
+            <p className="text-zinc-400">Sin habilitación vigente</p>
           )}
         </div>
       </div>
@@ -269,14 +225,8 @@ export default function ProveedorPortalPage() {
             <span className="font-medium text-sm">Sistema Legajos</span>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-zinc-500 text-xs hidden sm:inline truncate max-w-32">{proveedor?.razon_social}</span>
-            <button onClick={handleLogout} className="text-zinc-600 hover:text-zinc-300 text-xs transition-colors flex items-center gap-1">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
-              </svg>
-              Salir
-            </button>
+            <span className="text-zinc-500 text-xs hidden sm:inline">{proveedor?.razon_social}</span>
+            <button onClick={handleLogout} className="text-zinc-600 hover:text-zinc-300 text-xs transition-colors">Salir</button>
           </div>
         </div>
       </nav>
@@ -314,6 +264,12 @@ export default function ProveedorPortalPage() {
           </div>
         )}
 
+        {vista === 'docs' && !habilitacion && (
+          <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-5 mb-4 text-center">
+            <p className="text-zinc-400 text-sm">Tu legajo está pendiente de aprobación</p>
+          </div>
+        )}
+
         {vista !== 'qr' && (
           <>
             <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-5 mb-4">
@@ -322,12 +278,11 @@ export default function ProveedorPortalPage() {
                   <h2 className="text-white font-medium">{proveedor?.razon_social}</h2>
                   <p className="text-zinc-500 text-sm">CUIT {proveedor?.cuit}</p>
                 </div>
-                <span className={`text-xs px-2.5 py-1 rounded-full border ${
-                  proveedor?.estado === 'APROBADO' ? colorClass('green') :
-                  proveedor?.estado === 'EN_REVISION' ? colorClass('blue') :
-                  proveedor?.estado === 'RECHAZADO' ? colorClass('red') :
-                  colorClass('yellow')
-                }`}>{proveedor?.estado}</span>
+                <span className={`text-xs px-2.5 py-1 rounded-full border ${colorClass(
+                  proveedor?.estado === 'APROBADO' ? 'green' :
+                  proveedor?.estado === 'EN_REVISION' ? 'blue' :
+                  proveedor?.estado === 'RECHAZADO' ? 'red' : 'zinc'
+                )}`}>{proveedor?.estado}</span>
               </div>
               <div className="flex items-center justify-between mb-1">
                 <span className="text-zinc-500 text-xs">Documentación</span>
@@ -342,19 +297,14 @@ export default function ProveedorPortalPage() {
             <div className="flex gap-1 mb-4 bg-white/[0.03] border border-white/[0.06] rounded-xl p-1">
               {habilitacion && (
                 <button onClick={() => setVista('qr')}
-                  className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-green-600/20 text-green-400 transition-all">
+                  className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-green-600/20 text-green-400">
                   ← Mi QR
                 </button>
               )}
-              {[
-                { key: 'docs',      label: 'Documentos' },
-                { key: 'operarios', label: 'Equipo' },
-                { key: 'historial', label: 'Historial' },
-                { key: 'perfil',    label: 'Perfil' },
-              ].map((t: any) => (
-                <button key={t.key} onClick={() => setVista(t.key as Vista)}
-                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${vista === t.key ? 'bg-white/[0.08] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>
-                  {t.label}
+              {(['docs', 'operarios', 'historial', 'perfil'] as Vista[]).map(t => (
+                <button key={t} onClick={() => setVista(t)}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${vista === t ? 'bg-white/[0.08] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>
+                  {t === 'docs' ? 'Documentos' : t === 'operarios' ? 'Equipo' : t === 'historial' ? 'Historial' : 'Perfil'}
                 </button>
               ))}
             </div>
@@ -363,7 +313,6 @@ export default function ProveedorPortalPage() {
               <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
                 <div className="px-5 py-4 border-b border-white/[0.06]">
                   <h3 className="text-sm font-medium">Documentos requeridos</h3>
-                  <p className="text-zinc-500 text-xs mt-0.5">PDF, JPG o PNG · Ingresá la fecha antes de subir</p>
                 </div>
                 <div className="divide-y divide-white/[0.04]">
                   {docs.map((doc: any) => {
@@ -376,7 +325,7 @@ export default function ProveedorPortalPage() {
                         <div className="flex items-start justify-between gap-4 mb-2">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-0.5">
-                              <span className="text-zinc-500 text-xs font-mono shrink-0">{dr?.codigo}</span>
+                              <span className="text-zinc-500 text-xs font-mono">{dr?.codigo}</span>
                               <span className="text-sm text-white truncate">{dr?.nombre}</span>
                               {dr?.obligatorio && <span className="text-red-400 text-xs">*</span>}
                             </div>
@@ -390,8 +339,7 @@ export default function ProveedorPortalPage() {
                           <div className="flex items-center gap-2 shrink-0">
                             <span className={`text-xs px-2 py-0.5 rounded-full border ${colorClass(dcfg.color)}`}>{dcfg.label}</span>
                             {doc.archivo_url && (
-                              <a href={doc.archivo_url} target="_blank" rel="noopener noreferrer"
-                                className="text-zinc-500 hover:text-zinc-300 transition-colors">
+                              <a href={doc.archivo_url} target="_blank" rel="noopener noreferrer" className="text-zinc-500 hover:text-zinc-300">
                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                   <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
                                   <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
@@ -408,13 +356,13 @@ export default function ProveedorPortalPage() {
                                 <input type="date" value={fechas[doc.id] || doc.fecha_venc || ''}
                                   onChange={e => setFechas(f => ({ ...f, [doc.id]: e.target.value }))}
                                   min={new Date().toISOString().split('T')[0]}
-                                  className="bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-1 text-white text-xs focus:outline-none focus:border-blue-500/60 transition-all"/>
+                                  className="bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-1 text-white text-xs focus:outline-none"/>
                               </div>
                             )}
                             <label className={`cursor-pointer ${estaSubiendo ? 'opacity-50 pointer-events-none' : ''}`}>
                               <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden"
                                 onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(doc.id, f) }}/>
-                              <span className="bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.1] text-zinc-300 text-xs px-3 py-1.5 rounded-lg transition-all inline-block">
+                              <span className="bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.1] text-zinc-300 text-xs px-3 py-1.5 rounded-lg inline-block">
                                 {estaSubiendo ? 'Subiendo...' : doc.estado === 'RECHAZADO' ? 'Resubir' : 'Subir archivo'}
                               </span>
                             </label>
@@ -427,129 +375,6 @@ export default function ProveedorPortalPage() {
               </div>
             )}
 
-            {vista === 'operarios' && (
-              <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
-                <div className="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between">
-                  <div>
-                    <h3 className="text-sm font-medium">Equipo con acceso al QR</h3>
-                    <p className="text-zinc-500 text-xs mt-0.5">Los operarios solo pueden ver el carnet QR</p>
-                  </div>
-                  <button onClick={() => setAgregandoOp(true)}
-                    className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-                    </svg>
-                    Agregar
-                  </button>
-                </div>
-                {agregandoOp && (
-                  <div className="px-5 py-4 border-b border-white/[0.06] bg-blue-500/5">
-                    <form onSubmit={invitarOperario} className="space-y-3">
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-zinc-400 text-xs mb-1">Nombre</label>
-                          <input value={nuevoOperario.nombre}
-                            onChange={e => setNuevoOperario(o => ({ ...o, nombre: e.target.value }))}
-                            required placeholder="Juan García"
-                            className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500/60 transition-all"/>
-                        </div>
-                        <div>
-                          <label className="block text-zinc-400 text-xs mb-1">Email</label>
-                          <input type="email" value={nuevoOperario.email}
-                            onChange={e => setNuevoOperario(o => ({ ...o, email: e.target.value }))}
-                            required placeholder="juan@email.com"
-                            className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500/60 transition-all"/>
-                        </div>
-                      </div>
-                      {error && <p className="text-red-400 text-xs">{error}</p>}
-                      <div className="flex gap-2">
-                        <button type="submit" disabled={loadingOp}
-                          className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs px-4 py-2 rounded-lg transition-colors">
-                          {loadingOp ? 'Agregando...' : 'Agregar operario'}
-                        </button>
-                        <button type="button" onClick={() => { setAgregandoOp(false); setError('') }}
-                          className="text-zinc-500 hover:text-zinc-300 text-xs transition-colors px-3">
-                          Cancelar
-                        </button>
-                      </div>
-                    </form>
-                  </div>
-                )}
-                <div className="divide-y divide-white/[0.04]">
-                  {operarios.map((op: any) => (
-                    <div key={op.id} className={`px-5 py-3 flex items-center justify-between ${!op.activo ? 'opacity-50' : ''}`}>
-                      <div>
-                        <p className="text-white text-sm">{op.nombre ?? 'Sin nombre'}</p>
-                        <span className={`text-xs px-2 py-0.5 rounded-full border ${op.rol === 'titular' ? colorClass('blue') : colorClass('zinc')}`}>
-                          {op.rol === 'titular' ? 'Titular' : 'Operario'}
-                        </span>
-                      </div>
-                      {op.rol !== 'titular' && (
-                        <button onClick={() => toggleOperario(op.id, op.activo)}
-                          className={`text-xs px-2.5 py-1 rounded-full border transition-all ${
-                            op.activo
-                              ? 'bg-green-500/10 text-green-400 border-green-500/20 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20'
-                              : 'bg-zinc-500/10 text-zinc-500 border-zinc-500/20 hover:bg-green-500/10 hover:text-green-400 hover:border-green-500/20'
-                          }`}>
-                          {op.activo ? 'Activo' : 'Inactivo'}
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  {operarios.length === 0 && (
-                    <div className="px-5 py-6 text-center">
-                      <p className="text-zinc-600 text-sm">Sin operarios agregados todavía</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {vista === 'historial' && (
-              <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
-                <div className="px-5 py-4 border-b border-white/[0.06]">
-                  <h3 className="text-sm font-medium">Registros de acceso</h3>
-                </div>
-                {accesos.length === 0 ? (
-                  <div className="px-5 py-8 text-center"><p className="text-zinc-600 text-sm">Sin registros todavía</p></div>
-                ) : (
-                  <div className="divide-y divide-white/[0.04]">
-                    {accesos.map((acc: any) => (
-                      <div key={acc.id} className="px-5 py-3 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-7 h-7 rounded-full flex items-center justify-center ${acc.tipo === 'INGRESO' ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-                              stroke={acc.tipo === 'INGRESO' ? '#22c55e' : '#ef4444'} strokeWidth="2.5">
-                              {acc.tipo === 'INGRESO'
-                                ? <><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></>
-                                : <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></>
-                              }
-                            </svg>
-                          </div>
-                          <div>
-                            <p className={`text-sm font-medium ${acc.tipo === 'INGRESO' ? 'text-green-400' : 'text-red-400'}`}>
-                              {acc.tipo === 'INGRESO' ? 'Ingreso' : 'Egreso'}
-                            </p>
-                            <p className="text-zinc-600 text-xs">
-                              {new Date(acc.created_at).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                            </p>
-                          </div>
-                        </div>
-                        {acc.lat && acc.lng && (
-                          <a href={`https://maps.google.com/?q=${acc.lat},${acc.lng}`} target="_blank" rel="noopener noreferrer"
-                            className="text-zinc-600 hover:text-zinc-400 text-xs transition-colors">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
-                            </svg>
-                          </a>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
             {vista === 'perfil' && (
               <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-5">
                 <h3 className="text-sm font-medium mb-4">Datos de la empresa</h3>
@@ -558,9 +383,7 @@ export default function ProveedorPortalPage() {
                     { label: 'Razón social', value: proveedor?.razon_social },
                     { label: 'CUIT', value: proveedor?.cuit },
                     { label: 'Email', value: proveedor?.email },
-                    { label: 'Teléfono', value: proveedor?.telefono ?? '—' },
                     { label: 'Rubro', value: (proveedor?.rubros as any)?.nombre },
-                    { label: 'Registrado', value: proveedor ? new Date(proveedor.created_at).toLocaleDateString('es-AR') : '' },
                   ].map(({ label, value }) => (
                     <div key={label} className="flex items-center justify-between">
                       <span className="text-zinc-500 text-sm">{label}</span>
