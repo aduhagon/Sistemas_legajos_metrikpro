@@ -25,34 +25,11 @@ export default function ProveedorLoginPage() {
       return
     }
 
-    // Pequeña espera para que el token JWT se propague
-    await new Promise(r => setTimeout(r, 500))
+    // Verificar que es proveedor usando función SECURITY DEFINER (bypasea RLS)
+    const { data: provData, error: provErr } = await supabase
+      .rpc('verificar_proveedor_usuario', { p_user_id: data.user.id })
 
-    // Verificar que es proveedor usando el access token directamente
-    const { data: puData, error: puErr } = await supabase
-      .from('proveedores_usuarios')
-      .select('proveedor_id, rol')
-      .eq('user_id', data.user.id)
-      .eq('activo', true)
-      .maybeSingle()
-
-    if (puErr) {
-      // Si hay error de RLS, intentar de nuevo después de otro delay
-      await new Promise(r => setTimeout(r, 1000))
-      const { data: puData2, error: puErr2 } = await supabase
-        .from('proveedores_usuarios')
-        .select('proveedor_id, rol')
-        .eq('user_id', data.user.id)
-        .eq('activo', true)
-        .maybeSingle()
-
-      if (puErr2 || !puData2) {
-        await supabase.auth.signOut()
-        setError('Esta cuenta no está asociada a ningún proveedor')
-        setLoading(false)
-        return
-      }
-    } else if (!puData) {
+    if (provErr || !provData) {
       await supabase.auth.signOut()
       setError('Esta cuenta no está asociada a ningún proveedor')
       setLoading(false)
@@ -80,7 +57,6 @@ export default function ProveedorLoginPage() {
 
   const inputCls = "w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-4 py-2.5 text-white placeholder:text-zinc-600 text-sm focus:outline-none focus:border-blue-500/60 transition-all"
 
-  // Detectar mensaje de éxito de cambio de contraseña
   const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
   const mostrarExito = params?.get('msg') === 'password_actualizado'
 
