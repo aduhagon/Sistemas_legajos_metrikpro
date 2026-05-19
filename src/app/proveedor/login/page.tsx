@@ -25,7 +25,10 @@ export default function ProveedorLoginPage() {
       return
     }
 
-    // Verificar que es proveedor — query directa sin RPC
+    // Pequeña espera para que el token JWT se propague
+    await new Promise(r => setTimeout(r, 500))
+
+    // Verificar que es proveedor usando el access token directamente
     const { data: puData, error: puErr } = await supabase
       .from('proveedores_usuarios')
       .select('proveedor_id, rol')
@@ -33,7 +36,23 @@ export default function ProveedorLoginPage() {
       .eq('activo', true)
       .maybeSingle()
 
-    if (puErr || !puData) {
+    if (puErr) {
+      // Si hay error de RLS, intentar de nuevo después de otro delay
+      await new Promise(r => setTimeout(r, 1000))
+      const { data: puData2, error: puErr2 } = await supabase
+        .from('proveedores_usuarios')
+        .select('proveedor_id, rol')
+        .eq('user_id', data.user.id)
+        .eq('activo', true)
+        .maybeSingle()
+
+      if (puErr2 || !puData2) {
+        await supabase.auth.signOut()
+        setError('Esta cuenta no está asociada a ningún proveedor')
+        setLoading(false)
+        return
+      }
+    } else if (!puData) {
       await supabase.auth.signOut()
       setError('Esta cuenta no está asociada a ningún proveedor')
       setLoading(false)
@@ -61,6 +80,10 @@ export default function ProveedorLoginPage() {
 
   const inputCls = "w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-4 py-2.5 text-white placeholder:text-zinc-600 text-sm focus:outline-none focus:border-blue-500/60 transition-all"
 
+  // Detectar mensaje de éxito de cambio de contraseña
+  const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
+  const mostrarExito = params?.get('msg') === 'password_actualizado'
+
   return (
     <div className="min-h-screen bg-[#0f1117] flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
@@ -78,6 +101,12 @@ export default function ProveedorLoginPage() {
           </div>
           <p className="text-zinc-500 text-sm">Portal del proveedor</p>
         </div>
+
+        {mostrarExito && (
+          <div className="bg-green-500/10 border border-green-500/20 rounded-xl px-4 py-3 mb-4">
+            <p className="text-green-400 text-sm">✓ Contraseña actualizada. Ingresá con tu nueva contraseña.</p>
+          </div>
+        )}
 
         <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-8">
           {modo === 'login' ? (
@@ -116,7 +145,7 @@ export default function ProveedorLoginPage() {
                 {error && <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2"><span className="text-red-400 text-sm">{error}</span></div>}
                 <button type="submit" disabled={loading}
                   className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-medium rounded-lg py-2.5 text-sm transition-colors">
-                  {loading ? 'Ingresando...' : 'Ingresar'}
+                  {loading ? 'Verificando...' : 'Ingresar'}
                 </button>
               </form>
               <div className="mt-4 text-center">
