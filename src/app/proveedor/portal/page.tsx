@@ -29,25 +29,31 @@ export default function ProveedorPortalPage() {
 
   async function cargarTodo() {
     try {
-      console.log('[PORTAL] Obteniendo sesión...')
-      setDebugMsg('Obteniendo sesión...')
+      console.log('[PORTAL] Obteniendo usuario...')
+      setDebugMsg('Obteniendo usuario...')
       
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+      // Race entre getUser y timeout de 3s
+      const userPromise = supabase.auth.getUser()
+      const timeoutPromise = new Promise<{data: {user: null}, error: Error}>((resolve) => 
+        setTimeout(() => resolve({ data: { user: null }, error: new Error('timeout') }), 3000)
+      )
       
-      console.log('[PORTAL] Sesión:', sessionData, sessionError)
+      const result: any = await Promise.race([userPromise, timeoutPromise])
+      console.log('[PORTAL] Resultado:', result)
       
-      if (sessionError) {
-        setDebugMsg(`Error getSession: ${sessionError.message}`)
+      if (result.error?.message === 'timeout') {
+        setDebugMsg('Timeout — redirigiendo al login en 2s...')
+        setTimeout(() => window.location.href = '/proveedor/login', 2000)
         return
       }
       
-      if (!sessionData?.session?.user) {
-        setDebugMsg('Sin sesión — redirigiendo en 2s...')
+      if (!result.data?.user) {
+        setDebugMsg('Sin usuario — redirigiendo en 2s...')
         setTimeout(() => window.location.href = '/proveedor/login', 2000)
         return
       }
 
-      const userId = sessionData.session.user.id
+      const userId = result.data.user.id
       console.log('[PORTAL] User ID:', userId)
       setDebugMsg(`Verificando proveedor... (user: ${userId.slice(0,8)})`)
 
