@@ -2,23 +2,17 @@ import { createClient } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
 import PortalClient from './PortalClient'
 
-// Server Component — corre en el servidor, lee cookies directamente
 export default async function ProveedorPortalPage() {
   const supabase = createClient()
 
-  // 1. Obtener usuario del servidor (lee cookie directamente)
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/proveedor/login')
 
-  // 2. Verificar que es proveedor (función SECURITY DEFINER)
   const { data: provVerif } = await supabase
     .rpc('verificar_proveedor_usuario', { p_user_id: user.id })
 
-  if (!provVerif) {
-    redirect('/proveedor/login')
-  }
+  if (!provVerif) redirect('/proveedor/login')
 
-  // 3. Cargar todos los datos en el servidor
   const [
     { data: proveedor },
     { data: docs },
@@ -42,13 +36,12 @@ export default async function ProveedorPortalPage() {
       .maybeSingle(),
     provVerif.rol === 'titular' ? supabase
       .from('proveedores_usuarios')
-      .select('id, rol, nombre, activo, user_id')
+      .select('id, rol, nombre, cuil, activo, user_id')
       .eq('proveedor_id', provVerif.proveedor_id) : Promise.resolve({ data: [] }),
   ])
 
   if (!proveedor) redirect('/proveedor/login')
 
-  // Cargar accesos si hay habilitación
   let accesos: any[] = []
   if (habilitacion) {
     const { data: accData } = await supabase

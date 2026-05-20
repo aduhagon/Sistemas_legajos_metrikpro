@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase-client'
 import { QRCodeSVG } from 'qrcode.react'
 
@@ -26,9 +26,12 @@ export default function PortalClient({ proveedor: provInit, docs: docsInit, habi
   const [subiendo, setSubiendo] = useState<string | null>(null)
   const [uploadOk, setUploadOk] = useState<string | null>(null)
   const [error, setError] = useState('')
-  const [nuevoOperario, setNuevoOperario] = useState({ email: '', nombre: '' })
+  const [nuevoOperario, setNuevoOperario] = useState({ nombre: '', cuil: '', email: '' })
   const [agregandoOp, setAgregandoOp] = useState(false)
   const [loadingOp, setLoadingOp] = useState(false)
+  const [importando, setImportando] = useState(false)
+  const [resultadoImport, setResultadoImport] = useState<any>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   async function handleLogout() {
     await supabase.auth.signOut()
@@ -75,11 +78,11 @@ export default function PortalClient({ proveedor: provInit, docs: docsInit, habi
     setLoadingOp(true)
     setError('')
 
-    // Crear cuenta vía función SECURITY DEFINER (no afecta la sesión del titular)
     const { data: result, error: rpcErr } = await supabase.rpc('invitar_operario', {
       p_proveedor_id: proveedor.id,
       p_email: nuevoOperario.email,
       p_nombre: nuevoOperario.nombre,
+      p_cuil: nuevoOperario.cuil || null,
     })
 
     if (rpcErr || result?.error) {
@@ -88,19 +91,17 @@ export default function PortalClient({ proveedor: provInit, docs: docsInit, habi
       return
     }
 
-    // Enviar email de recovery para que el operario defina su contraseña
+    // Enviar email de recovery para definir contraseña
     await supabase.auth.resetPasswordForEmail(nuevoOperario.email, {
       redirectTo: `${window.location.origin}/auth/proveedor-callback?type=recovery`,
     })
 
     setOperarios(prev => [...prev, {
-      id: result.user_id,
-      rol: 'operario',
-      nombre: nuevoOperario.nombre,
-      activo: true,
-      user_id: result.user_id,
+      id: result.user_id, rol: 'operario',
+      nombre: nuevoOperario.nombre, cuil: nuevoOperario.cuil,
+      activo: true, user_id: result.user_id,
     }])
-    setNuevoOperario({ email: '', nombre: '' })
+    setNuevoOperario({ nombre: '', cuil: '', email: '' })
     setAgregandoOp(false)
     setLoadingOp(false)
   }
@@ -108,6 +109,99 @@ export default function PortalClient({ proveedor: provInit, docs: docsInit, habi
   async function toggleOperario(opId: string, activo: boolean) {
     await supabase.from('proveedores_usuarios').update({ activo: !activo }).eq('id', opId)
     setOperarios(prev => prev.map((o: any) => o.id === opId ? { ...o, activo: !activo } : o))
+  }
+
+  async function eliminarOperario(opId: string, nombre: string) {
+    if (!confirm(`¿Eliminar a ${nombre}? Esto borra la cuenta y libera el email para volver a usar.`)) return
+
+    const { data: result, error: rpcErr } = await supabase.rpc('eliminar_operario', {
+      p_proveedor_id: proveedor.id,
+      p_operario_id: opId,
+    })
+
+    if (rpcErr || result?.error) {
+      setError(result?.error ?? rpcErr?.message ?? 'Error al eliminar')
+      return
+    }
+
+    setOperarios(prev => prev.filter((o: any) => o.id !== opId))
+  }
+
+  async function handleImportar(file: File) {
+    setImportando(true)
+    setError('')
+    setResultadoImport(null)
+
+    try {
+      // Cargar SheetJS dinámicamente
+      const XLSX = await import('xlsx')
+      const buffer = await file.arrayBuffer()
+      const workbook = XLSX.read(buffer, { type: 'array' })
+      const sheet = workbook.Sheets[workbook.SheetNames[0]]
+      const rows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' })
+
+      // Normalizar nombres de columnas (case-insensitive, sin acentos)
+      const normalizar = (s: string) => s.toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
+      
+      const operariosData = rows.map((row: any) => {
+        const keys = Object.keys(row)
+        const findKey = (variants: string[]) => keys.find(k => variants.includes(normalizar(k))) ?? ''
+        return {
+          nombre: (row[findKey(['nombre', 'name'])] || '').toString().trim(),
+          cuil: (row[findKey(['cuil'])] || '').toString().trim(),
+          email: (row[findKey(['email', 'mail', 'correo'])] || '').toString().trim(),
+        }
+      }).filter(op => op.email && op.nombre)
+
+      if (operariosData.length === 0) {
+        setError('No se encontraron filas con Nombre y Email. Verificá las columnas del Excel.')
+        setImportando(false)
+        return
+      }
+
+      const { data: result, error: rpcErr } = await supabase.rpc('importar_operarios_masivo', {
+        p_proveedor_id: proveedor.id,
+        p_operarios: operariosData,
+      })
+
+      if (rpcErr || result?.error) {
+        setError(result?.error ?? rpcErr?.message ?? 'Error al importar')
+        setImportando(false)
+        return
+      }
+
+      // Enviar emails de recovery a los creados
+      for (const op of operariosData) {
+        await supabase.auth.resetPasswordForEmail(op.email, {
+          redirectTo: `${window.location.origin}/auth/proveedor-callback?type=recovery`,
+        }).catch(() => {})
+      }
+
+      // Recargar lista de operarios
+      const { data: opsActuales } = await supabase
+        .from('proveedores_usuarios')
+        .select('id, rol, nombre, cuil, activo, user_id')
+        .eq('proveedor_id', proveedor.id)
+      
+      setOperarios(opsActuales ?? [])
+      setResultadoImport(result)
+    } catch (err: any) {
+      setError(`Error al leer archivo: ${err.message}`)
+    } finally {
+      setImportando(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  function descargarPlantilla() {
+    const csv = 'Nombre,CUIL,Email\nJuan Pérez,20-12345678-9,juan@example.com\nMaría López,27-87654321-3,maria@example.com'
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'plantilla_operarios.csv'
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   const qrUrl = habilitacion
@@ -129,23 +223,13 @@ export default function PortalClient({ proveedor: provInit, docs: docsInit, habi
     color === 'orange' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' :
     'bg-zinc-500/10 text-zinc-500 border-zinc-500/20'
 
-  // ── OPERARIO — solo QR ──
+  // ── OPERARIO ──
   if (miRol === 'operario') {
     return (
       <div className="min-h-screen bg-[#0f1117] text-white flex flex-col">
         <nav className="border-b border-white/[0.06] bg-[#0a0c12]/80 backdrop-blur sticky top-0 z-50">
           <div className="max-w-lg mx-auto px-4 h-14 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 bg-blue-500 rounded flex items-center justify-center">
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                  <rect x="1" y="1" width="6" height="6" rx="1" fill="white"/>
-                  <rect x="9" y="1" width="6" height="6" rx="1" fill="white" opacity="0.6"/>
-                  <rect x="1" y="9" width="6" height="6" rx="1" fill="white" opacity="0.6"/>
-                  <rect x="9" y="9" width="6" height="6" rx="1" fill="white" opacity="0.3"/>
-                </svg>
-              </div>
-              <span className="font-medium text-sm">Sistema Legajos</span>
-            </div>
+            <span className="font-medium text-sm">Sistema Legajos</span>
             <button onClick={handleLogout} className="text-zinc-600 hover:text-zinc-300 text-xs">Salir</button>
           </div>
         </nav>
@@ -167,7 +251,7 @@ export default function PortalClient({ proveedor: provInit, docs: docsInit, habi
     )
   }
 
-  // ── TITULAR — completo ──
+  // ── TITULAR ──
   const docsConProblemas = docs.filter((d: any) => ['RECHAZADO', 'VENCIDO'].includes(d.estado)).length
   const docsCompletos = docs.filter((d: any) => ['CARGADO', 'APROBADO'].includes(d.estado)).length
 
@@ -212,10 +296,10 @@ export default function PortalClient({ proveedor: provInit, docs: docsInit, habi
             </div>
             <div className="flex gap-1 w-full bg-white/[0.03] border border-white/[0.06] rounded-xl p-1">
               {[
-                { key: 'docs',      label: `Documentos${docsConProblemas > 0 ? ' ⚠' : ''}` },
-                { key: 'operarios', label: `Equipo (${operarios.length})` },
+                { key: 'docs', label: `Documentos${docsConProblemas > 0 ? ' ⚠' : ''}` },
+                { key: 'operarios', label: `Equipo (${operarios.filter((o: any) => o.rol === 'operario').length})` },
                 { key: 'historial', label: 'Historial' },
-                { key: 'perfil',    label: 'Perfil' },
+                { key: 'perfil', label: 'Perfil' },
               ].map((t: any) => (
                 <button key={t.key} onClick={() => setVista(t.key as Vista)}
                   className="flex-1 py-1.5 rounded-lg text-xs font-medium text-zinc-500 hover:text-zinc-300 transition-all">
@@ -320,63 +404,113 @@ export default function PortalClient({ proveedor: provInit, docs: docsInit, habi
 
             {vista === 'operarios' && (
               <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
-                <div className="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between">
-                  <div>
-                    <h3 className="text-sm font-medium">Equipo con acceso al QR</h3>
-                    <p className="text-zinc-500 text-xs mt-0.5">Los operarios solo pueden ver el carnet QR</p>
+                <div className="px-5 py-4 border-b border-white/[0.06]">
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <h3 className="text-sm font-medium">Equipo con acceso al QR</h3>
+                      <p className="text-zinc-500 text-xs mt-0.5">Cada operario recibe un email para definir su contraseña</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => fileInputRef.current?.click()}
+                        disabled={importando}
+                        className="bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.1] text-zinc-300 text-xs px-3 py-1.5 rounded-lg disabled:opacity-50">
+                        {importando ? 'Importando...' : '↑ Importar Excel'}
+                      </button>
+                      <button onClick={() => setAgregandoOp(true)}
+                        className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-1.5 rounded-lg">
+                        + Agregar
+                      </button>
+                    </div>
                   </div>
-                  <button onClick={() => setAgregandoOp(true)}
-                    className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-1.5 rounded-lg">
-                    + Agregar
+                  <button onClick={descargarPlantilla} className="text-blue-400 hover:text-blue-300 text-xs">
+                    Descargar plantilla CSV
                   </button>
+                  <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) handleImportar(f) }}/>
                 </div>
+
+                {resultadoImport && (
+                  <div className="px-5 py-3 border-b border-white/[0.06] bg-blue-500/5">
+                    <p className="text-blue-300 text-sm">
+                      ✓ {resultadoImport.creados} operarios agregados
+                      {resultadoImport.omitidos > 0 && ` · ${resultadoImport.omitidos} omitidos`}
+                    </p>
+                    {resultadoImport.errores?.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {resultadoImport.errores.map((e: any, i: number) => (
+                          <p key={i} className="text-zinc-500 text-xs">
+                            {e.email}: {e.error}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {agregandoOp && (
                   <div className="px-5 py-4 border-b border-white/[0.06] bg-blue-500/5">
                     <form onSubmit={invitarOperario} className="space-y-3">
                       <div className="grid grid-cols-2 gap-3">
                         <input value={nuevoOperario.nombre}
                           onChange={e => setNuevoOperario(o => ({ ...o, nombre: e.target.value }))}
-                          required placeholder="Nombre"
-                          className="bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-2 text-white text-sm"/>
-                        <input type="email" value={nuevoOperario.email}
-                          onChange={e => setNuevoOperario(o => ({ ...o, email: e.target.value }))}
-                          required placeholder="Email"
-                          className="bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-2 text-white text-sm"/>
+                          required placeholder="Nombre completo"
+                          className="bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-2 text-white text-sm placeholder:text-zinc-600"/>
+                        <input value={nuevoOperario.cuil}
+                          onChange={e => setNuevoOperario(o => ({ ...o, cuil: e.target.value }))}
+                          placeholder="CUIL"
+                          className="bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-2 text-white text-sm placeholder:text-zinc-600"/>
                       </div>
+                      <input type="email" value={nuevoOperario.email}
+                        onChange={e => setNuevoOperario(o => ({ ...o, email: e.target.value }))}
+                        required placeholder="Email"
+                        className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-2 text-white text-sm placeholder:text-zinc-600"/>
                       {error && <p className="text-red-400 text-xs">{error}</p>}
                       <div className="flex gap-2">
                         <button type="submit" disabled={loadingOp}
                           className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs px-4 py-2 rounded-lg">
                           {loadingOp ? 'Agregando...' : 'Agregar'}
                         </button>
-                        <button type="button" onClick={() => { setAgregandoOp(false); setError('') }}
+                        <button type="button" onClick={() => { setAgregandoOp(false); setError(''); setNuevoOperario({ nombre: '', cuil: '', email: '' }) }}
                           className="text-zinc-500 hover:text-zinc-300 text-xs px-3">Cancelar</button>
                       </div>
                     </form>
                   </div>
                 )}
+
                 <div className="divide-y divide-white/[0.04]">
                   {operarios.map((op: any) => (
                     <div key={op.id} className={`px-5 py-3 flex items-center justify-between ${!op.activo ? 'opacity-50' : ''}`}>
-                      <div>
-                        <p className="text-white text-sm">{op.nombre ?? 'Sin nombre'}</p>
-                        <span className={`text-xs px-2 py-0.5 rounded-full border ${op.rol === 'titular' ? colorClass('blue') : colorClass('zinc')}`}>
-                          {op.rol === 'titular' ? 'Titular' : 'Operario'}
-                        </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white text-sm truncate">{op.nombre ?? 'Sin nombre'}</p>
+                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                          <span className={`text-xs px-2 py-0.5 rounded-full border ${op.rol === 'titular' ? colorClass('blue') : colorClass('zinc')}`}>
+                            {op.rol === 'titular' ? 'Titular' : 'Operario'}
+                          </span>
+                          {op.cuil && <span className="text-zinc-600 text-xs">CUIL {op.cuil}</span>}
+                        </div>
                       </div>
                       {op.rol !== 'titular' && (
-                        <button onClick={() => toggleOperario(op.id, op.activo)}
-                          className={`text-xs px-2.5 py-1 rounded-full border ${
-                            op.activo
-                              ? 'bg-green-500/10 text-green-400 border-green-500/20'
-                              : 'bg-zinc-500/10 text-zinc-500 border-zinc-500/20'
-                          }`}>
-                          {op.activo ? 'Activo' : 'Inactivo'}
-                        </button>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button onClick={() => toggleOperario(op.id, op.activo)}
+                            className={`text-xs px-2.5 py-1 rounded-full border ${
+                              op.activo
+                                ? 'bg-green-500/10 text-green-400 border-green-500/20'
+                                : 'bg-zinc-500/10 text-zinc-500 border-zinc-500/20'
+                            }`}>
+                            {op.activo ? 'Activo' : 'Inactivo'}
+                          </button>
+                          <button onClick={() => eliminarOperario(op.id, op.nombre)}
+                            title="Eliminar"
+                            className="text-zinc-600 hover:text-red-400 transition-colors">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/>
+                            </svg>
+                          </button>
+                        </div>
                       )}
                     </div>
                   ))}
-                  {operarios.length === 0 && (
+                  {operarios.filter((o: any) => o.rol === 'operario').length === 0 && (
                     <div className="px-5 py-6 text-center"><p className="text-zinc-600 text-sm">Sin operarios todavía</p></div>
                   )}
                 </div>

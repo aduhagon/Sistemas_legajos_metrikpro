@@ -4,7 +4,6 @@ import { notFound } from 'next/navigation'
 export default async function QRValidacionPage({ params }: { params: { token: string } }) {
   const supabase = createClient()
 
-  // Validar QR usando la función que ya existe en Supabase
   const { data: resultado } = await supabase
     .rpc('validar_qr', { p_qr_token: params.token })
 
@@ -18,8 +17,6 @@ export default async function QRValidacionPage({ params }: { params: { token: st
   return (
     <div className="min-h-screen bg-[#0f1117] flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
-
-        {/* Logo */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2">
             <div className="w-8 h-8 bg-blue-500 rounded flex items-center justify-center">
@@ -34,13 +31,9 @@ export default async function QRValidacionPage({ params }: { params: { token: st
           </div>
         </div>
 
-        {/* Card resultado */}
         <div className={`rounded-2xl border p-8 text-center ${
-          valido
-            ? 'bg-green-500/5 border-green-500/30'
-            : 'bg-red-500/5 border-red-500/30'
+          valido ? 'bg-green-500/5 border-green-500/30' : 'bg-red-500/5 border-red-500/30'
         }`}>
-          {/* Ícono */}
           <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-5 ${
             valido ? 'bg-green-500/10' : 'bg-red-500/10'
           }`}>
@@ -55,20 +48,30 @@ export default async function QRValidacionPage({ params }: { params: { token: st
             )}
           </div>
 
-          {/* Estado */}
-          <h1 className={`text-2xl font-semibold mb-2 ${valido ? 'text-green-400' : 'text-red-400'}`}>
+          <h1 className={`text-2xl font-semibold mb-4 ${valido ? 'text-green-400' : 'text-red-400'}`}>
             {valido ? 'Acceso habilitado' : 'Acceso denegado'}
           </h1>
 
-          {/* Datos del proveedor */}
+          {/* Persona que ingresa */}
+          {resultado.titular_nombre && (
+            <div className="bg-white/[0.03] border border-white/[0.08] rounded-xl px-4 py-3 mb-3">
+              <p className="text-zinc-500 text-xs mb-1">Persona que ingresa</p>
+              <p className="text-white text-lg font-medium">{resultado.titular_nombre}</p>
+              {resultado.titular_cuil && (
+                <p className="text-zinc-400 text-sm">CUIL {resultado.titular_cuil}</p>
+              )}
+            </div>
+          )}
+
+          {/* Empresa */}
           {resultado.razon_social && (
             <div className="mb-4">
-              <p className="text-white text-lg font-medium">{resultado.razon_social}</p>
+              <p className="text-zinc-500 text-xs mb-0.5">Empresa</p>
+              <p className="text-white text-base">{resultado.razon_social}</p>
               <p className="text-zinc-500 text-sm">CUIT {resultado.cuit}</p>
             </div>
           )}
 
-          {/* Motivo si está denegado */}
           {!valido && resultado.motivo && (
             <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3 mb-4">
               <p className="text-red-300 text-sm">
@@ -82,7 +85,6 @@ export default async function QRValidacionPage({ params }: { params: { token: st
             </div>
           )}
 
-          {/* Vigencia */}
           {valido && fechaVenc && (
             <div className="bg-green-500/10 border border-green-500/20 rounded-xl px-4 py-3">
               <p className="text-green-300 text-sm">Vigente hasta el {fechaVenc}</p>
@@ -90,11 +92,9 @@ export default async function QRValidacionPage({ params }: { params: { token: st
           )}
         </div>
 
-        {/* Timestamp */}
         <p className="text-center text-zinc-600 text-xs mt-4">
           Verificado el {new Date().toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
         </p>
-
       </div>
     </div>
   )
