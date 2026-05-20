@@ -74,28 +74,32 @@ export default function PortalClient({ proveedor: provInit, docs: docsInit, habi
     e.preventDefault()
     setLoadingOp(true)
     setError('')
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: nuevoOperario.email,
-      password: Math.random().toString(36).slice(-10) + 'Aa1!',
-      options: { data: { nombre: nuevoOperario.nombre } }
+
+    // Crear cuenta vía función SECURITY DEFINER (no afecta la sesión del titular)
+    const { data: result, error: rpcErr } = await supabase.rpc('invitar_operario', {
+      p_proveedor_id: proveedor.id,
+      p_email: nuevoOperario.email,
+      p_nombre: nuevoOperario.nombre,
     })
-    if (authError || !authData.user) {
-      setError(authError?.message ?? 'Error al crear cuenta')
+
+    if (rpcErr || result?.error) {
+      setError(result?.error ?? rpcErr?.message ?? 'Error al agregar operario')
       setLoadingOp(false)
       return
     }
-    const { error: vinErr } = await supabase.from('proveedores_usuarios').insert({
-      proveedor_id: proveedor.id,
-      user_id: authData.user.id,
+
+    // Enviar email de recovery para que el operario defina su contraseña
+    await supabase.auth.resetPasswordForEmail(nuevoOperario.email, {
+      redirectTo: `${window.location.origin}/auth/proveedor-callback?type=recovery`,
+    })
+
+    setOperarios(prev => [...prev, {
+      id: result.user_id,
       rol: 'operario',
       nombre: nuevoOperario.nombre,
-    })
-    if (vinErr) {
-      setError('Error al agregar operario')
-      setLoadingOp(false)
-      return
-    }
-    setOperarios(prev => [...prev, { id: authData.user!.id, rol: 'operario', nombre: nuevoOperario.nombre, activo: true }])
+      activo: true,
+      user_id: result.user_id,
+    }])
     setNuevoOperario({ email: '', nombre: '' })
     setAgregandoOp(false)
     setLoadingOp(false)
