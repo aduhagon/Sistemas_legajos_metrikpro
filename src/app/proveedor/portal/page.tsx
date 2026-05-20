@@ -6,6 +6,39 @@ import { QRCodeSVG } from 'qrcode.react'
 
 type Vista = 'qr' | 'docs' | 'operarios' | 'historial' | 'perfil'
 
+// Leer user_id directamente del token JWT en la cookie
+function getUserIdFromCookie(): string | null {
+  if (typeof document === 'undefined') return null
+  try {
+    const cookies = document.cookie.split('; ')
+    const sbCookie = cookies.find(c => c.startsWith('sb-') && c.includes('auth-token'))
+    if (!sbCookie) return null
+    
+    const value = sbCookie.split('=')[1]
+    if (!value) return null
+    
+    // El valor puede ser "base64-xxxx" — extraer la parte base64
+    let tokenData = value
+    if (value.startsWith('base64-')) {
+      tokenData = value.slice(7)
+    }
+    
+    // Decodificar base64
+    const decoded = atob(decodeURIComponent(tokenData))
+    const session = JSON.parse(decoded)
+    
+    // El access_token es un JWT — decodificar el payload
+    const accessToken = session.access_token
+    if (!accessToken) return null
+    
+    const payload = JSON.parse(atob(accessToken.split('.')[1]))
+    return payload.sub || null
+  } catch (e) {
+    console.error('Error leyendo cookie:', e)
+    return null
+  }
+}
+
 export default function ProveedorPortalPage() {
   const [loading, setLoading] = useState(true)
   const [debugMsg, setDebugMsg] = useState('Iniciando...')
@@ -13,8 +46,6 @@ export default function ProveedorPortalPage() {
   const [proveedor, setProveedor] = useState<any>(null)
   const [habilitacion, setHabilitacion] = useState<any>(null)
   const [docs, setDocs] = useState<any[]>([])
-  const [operarios, setOperarios] = useState<any[]>([])
-  const [accesos, setAccesos] = useState<any[]>([])
   const [vista, setVista] = useState<Vista>('docs')
   const [fechas, setFechas] = useState<Record<string, string>>({})
   const [subiendo, setSubiendo] = useState<string | null>(null)
@@ -22,76 +53,57 @@ export default function ProveedorPortalPage() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    console.log('[PORTAL] useEffect iniciado')
-    setDebugMsg('useEffect iniciado')
     cargarTodo()
   }, [])
 
   async function cargarTodo() {
     try {
-      console.log('[PORTAL] Obteniendo usuario...')
-      setDebugMsg('Obteniendo usuario...')
+      setDebugMsg('Leyendo sesión...')
       
-      // Race entre getUser y timeout de 3s
-      const userPromise = supabase.auth.getUser()
-      const timeoutPromise = new Promise<{data: {user: null}, error: Error}>((resolve) => 
-        setTimeout(() => resolve({ data: { user: null }, error: new Error('timeout') }), 3000)
-      )
+      const userId = getUserIdFromCookie()
       
-      const result: any = await Promise.race([userPromise, timeoutPromise])
-      console.log('[PORTAL] Resultado:', result)
-      
-      if (result.error?.message === 'timeout') {
-        setDebugMsg('Timeout — redirigiendo al login en 2s...')
-        setTimeout(() => window.location.href = '/proveedor/login', 2000)
-        return
-      }
-      
-      if (!result.data?.user) {
-        setDebugMsg('Sin usuario — redirigiendo en 2s...')
-        setTimeout(() => window.location.href = '/proveedor/login', 2000)
+      if (!userId) {
+        setDebugMsg('Sin sesión — redirigiendo...')
+        setTimeout(() => window.location.href = '/proveedor/login', 1500)
         return
       }
 
-      const userId = result.data.user.id
-      console.log('[PORTAL] User ID:', userId)
-      setDebugMsg(`Verificando proveedor... (user: ${userId.slice(0,8)})`)
+      setDebugMsg('Verificando proveedor...')
 
       const { data: provVerif, error: rpcErr } = await supabase
         .rpc('verificar_proveedor_usuario', { p_user_id: userId })
 
-      console.log('[PORTAL] verificar_proveedor:', provVerif, rpcErr)
-
       if (rpcErr) {
-        setDebugMsg(`Error RPC: ${rpcErr.message}`)
+        setDebugMsg(`Error: ${rpcErr.message}`)
         return
       }
 
       if (!provVerif) {
         setDebugMsg('No es proveedor — redirigiendo...')
-        await supabase.auth.signOut()
-        setTimeout(() => window.location.href = '/proveedor/login', 2000)
+        document.cookie.split(';').forEach(c => {
+          if (c.trim().startsWith('sb-')) {
+            document.cookie = c.split('=')[0] + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/'
+          }
+        })
+        setTimeout(() => window.location.href = '/proveedor/login', 1500)
         return
       }
 
       setMiRol(provVerif.rol)
-      setDebugMsg('Cargando proveedor...')
+      setDebugMsg('Cargando datos...')
 
-      const { data: provData, error: provErr } = await supabase
+      const { data: provData } = await supabase
         .from('proveedores')
         .select('id, razon_social, cuit, estado, email, telefono, notif_vencimientos, rubros(nombre), created_at')
         .eq('id', provVerif.proveedor_id)
         .single()
 
-      console.log('[PORTAL] proveedor:', provData, provErr)
-
-      if (provErr || !provData) {
-        setDebugMsg(`Error proveedor: ${provErr?.message ?? 'no data'}`)
+      if (!provData) {
+        setDebugMsg('Sin datos de proveedor')
         return
       }
 
       setProveedor(provData)
-      setDebugMsg('Cargando documentos...')
 
       const { data: docsData } = await supabase
         .from('documentos_legajo')
@@ -110,15 +122,19 @@ export default function ProveedorPortalPage() {
 
       setDocs(docsData ?? [])
       setLoading(false)
-      console.log('[PORTAL] Carga completa')
     } catch (e: any) {
-      console.error('[PORTAL] Error:', e)
       setDebugMsg(`Excepción: ${e.message}`)
     }
   }
 
   async function handleLogout() {
-    await supabase.auth.signOut()
+    // Limpiar cookies manualmente
+    document.cookie.split(';').forEach(c => {
+      if (c.trim().startsWith('sb-')) {
+        document.cookie = c.split('=')[0] + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/'
+      }
+    })
+    try { await supabase.auth.signOut() } catch {}
     window.location.href = '/proveedor/login'
   }
 
@@ -126,7 +142,7 @@ export default function ProveedorPortalPage() {
     const dr = docs.find(d => d.id === docId)?.documentos_requeridos
     const necesitaFecha = dr?.tipo_vigencia !== 'PERMANENTE'
     if (necesitaFecha && !fechas[docId]) {
-      setError(`Ingresá la fecha de vencimiento de "${dr?.nombre}" antes de subir.`)
+      setError(`Ingresá la fecha de vencimiento antes de subir.`)
       return
     }
     setSubiendo(docId)
@@ -151,7 +167,7 @@ export default function ProveedorPortalPage() {
         : d))
       setUploadOk(docId)
     } catch (err: any) {
-      setError(`Error al subir: ${err.message}`)
+      setError(`Error: ${err.message}`)
     } finally {
       setSubiendo(null)
     }
@@ -188,63 +204,116 @@ export default function ProveedorPortalPage() {
     </div>
   )
 
+  const docsCompletos = docs.filter(d => ['CARGADO', 'APROBADO'].includes(d.estado)).length
+
   return (
     <div className="min-h-screen bg-[#0f1117] text-white">
       <nav className="border-b border-white/[0.06] bg-[#0a0c12]/80 backdrop-blur sticky top-0 z-50">
         <div className="max-w-lg mx-auto px-4 h-14 flex items-center justify-between">
-          <span className="font-medium text-sm">Sistema Legajos</span>
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 bg-blue-500 rounded flex items-center justify-center">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <rect x="1" y="1" width="6" height="6" rx="1" fill="white"/>
+                <rect x="9" y="1" width="6" height="6" rx="1" fill="white" opacity="0.6"/>
+                <rect x="1" y="9" width="6" height="6" rx="1" fill="white" opacity="0.6"/>
+                <rect x="9" y="9" width="6" height="6" rx="1" fill="white" opacity="0.3"/>
+              </svg>
+            </div>
+            <span className="font-medium text-sm">Sistema Legajos</span>
+          </div>
           <button onClick={handleLogout} className="text-zinc-600 hover:text-zinc-300 text-xs">Salir</button>
         </div>
       </nav>
+
       <div className="max-w-lg mx-auto px-4 py-6">
-        <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-5 mb-4">
-          <h2 className="text-white font-medium">{proveedor?.razon_social}</h2>
-          <p className="text-zinc-500 text-sm">CUIT {proveedor?.cuit}</p>
-          <p className="text-zinc-500 text-sm mt-2">Estado: {proveedor?.estado}</p>
-        </div>
-        <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
-          <div className="px-5 py-4 border-b border-white/[0.06]">
-            <h3 className="text-sm font-medium">Documentos ({docs.length})</h3>
+        {habilitacion && vista === 'qr' && (
+          <div className="flex flex-col items-center">
+            <span className="bg-green-500/10 text-green-400 border border-green-500/20 text-sm px-3 py-1 rounded-full mb-6">✓ Habilitado</span>
+            <div className="bg-white rounded-3xl p-6 mb-6 shadow-2xl">
+              <QRCodeSVG value={qrUrl} size={240} level="H" includeMargin={false}/>
+            </div>
+            <h2 className="text-white font-semibold text-xl">{proveedor?.razon_social}</h2>
+            <p className="text-zinc-500 text-sm mt-1">CUIT {proveedor?.cuit}</p>
+            <button onClick={() => setVista('docs')} className="mt-6 text-blue-400 text-sm">Ver documentos →</button>
           </div>
-          <div className="divide-y divide-white/[0.04]">
-            {docs.map((doc: any) => {
-              const dr = doc.documentos_requeridos
-              const dcfg = estadoDocCfg[doc.estado] ?? estadoDocCfg.PENDIENTE
-              const estaSubiendo = subiendo === doc.id
-              const necesitaFecha = dr?.tipo_vigencia !== 'PERMANENTE'
-              return (
-                <div key={doc.id} className="px-5 py-4">
-                  <div className="flex items-start justify-between gap-4 mb-2">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-0.5">
-                        <span className="text-zinc-500 text-xs font-mono">{dr?.codigo}</span>
-                        <span className="text-sm text-white truncate">{dr?.nombre}</span>
-                      </div>
-                    </div>
-                    <span className={`text-xs px-2 py-0.5 rounded-full border ${colorClass(dcfg.color)}`}>{dcfg.label}</span>
-                  </div>
-                  {doc.estado !== 'APROBADO' && (
-                    <div className="flex items-center gap-2 mt-2 flex-wrap">
-                      {necesitaFecha && (
-                        <input type="date" value={fechas[doc.id] || doc.fecha_venc || ''}
-                          onChange={e => setFechas(f => ({ ...f, [doc.id]: e.target.value }))}
-                          min={new Date().toISOString().split('T')[0]}
-                          className="bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-1 text-white text-xs"/>
-                      )}
-                      <label className={`cursor-pointer ${estaSubiendo ? 'opacity-50 pointer-events-none' : ''}`}>
-                        <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden"
-                          onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(doc.id, f) }}/>
-                        <span className="bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.1] text-zinc-300 text-xs px-3 py-1.5 rounded-lg inline-block">
-                          {estaSubiendo ? 'Subiendo...' : 'Subir'}
-                        </span>
-                      </label>
-                    </div>
-                  )}
+        )}
+
+        {vista === 'docs' && (
+          <>
+            <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-5 mb-4">
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <h2 className="text-white font-medium">{proveedor?.razon_social}</h2>
+                  <p className="text-zinc-500 text-sm">CUIT {proveedor?.cuit}</p>
                 </div>
-              )
-            })}
-          </div>
-        </div>
+                <span className={`text-xs px-2.5 py-1 rounded-full border ${colorClass(
+                  proveedor?.estado === 'APROBADO' ? 'green' :
+                  proveedor?.estado === 'EN_REVISION' ? 'blue' :
+                  proveedor?.estado === 'RECHAZADO' ? 'red' : 'zinc'
+                )}`}>{proveedor?.estado}</span>
+              </div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-zinc-500 text-xs">Documentación</span>
+                <span className="text-zinc-400 text-xs">{docsCompletos}/{docs.length}</span>
+              </div>
+              <div className="h-1.5 bg-white/[0.08] rounded-full overflow-hidden">
+                <div className="h-full bg-blue-500 rounded-full"
+                  style={{ width: `${docs.length > 0 ? (docsCompletos / docs.length) * 100 : 0}%` }}/>
+              </div>
+            </div>
+
+            <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
+              <div className="px-5 py-4 border-b border-white/[0.06]">
+                <h3 className="text-sm font-medium">Documentos requeridos</h3>
+              </div>
+              <div className="divide-y divide-white/[0.04]">
+                {docs.map((doc: any) => {
+                  const dr = doc.documentos_requeridos
+                  const dcfg = estadoDocCfg[doc.estado] ?? estadoDocCfg.PENDIENTE
+                  const estaSubiendo = subiendo === doc.id
+                  const necesitaFecha = dr?.tipo_vigencia !== 'PERMANENTE'
+                  return (
+                    <div key={doc.id} className="px-5 py-4">
+                      <div className="flex items-start justify-between gap-4 mb-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <span className="text-zinc-500 text-xs font-mono">{dr?.codigo}</span>
+                            <span className="text-sm text-white truncate">{dr?.nombre}</span>
+                            {dr?.obligatorio && <span className="text-red-400 text-xs">*</span>}
+                          </div>
+                          <div className="flex items-center gap-3 flex-wrap">
+                            <span className="text-zinc-600 text-xs">{dr?.tipo_vigencia}</span>
+                            {doc.fecha_venc && <span className="text-zinc-500 text-xs">Vence: {new Date(doc.fecha_venc).toLocaleDateString('es-AR')}</span>}
+                            {uploadOk === doc.id && <span className="text-green-400 text-xs">✓ Subido</span>}
+                          </div>
+                        </div>
+                        <span className={`text-xs px-2 py-0.5 rounded-full border shrink-0 ${colorClass(dcfg.color)}`}>{dcfg.label}</span>
+                      </div>
+                      {doc.estado !== 'APROBADO' && (
+                        <div className="flex items-center gap-2 mt-2 flex-wrap">
+                          {necesitaFecha && (
+                            <input type="date" value={fechas[doc.id] || doc.fecha_venc || ''}
+                              onChange={e => setFechas(f => ({ ...f, [doc.id]: e.target.value }))}
+                              min={new Date().toISOString().split('T')[0]}
+                              className="bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-1 text-white text-xs"/>
+                          )}
+                          <label className={`cursor-pointer ${estaSubiendo ? 'opacity-50 pointer-events-none' : ''}`}>
+                            <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden"
+                              onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(doc.id, f) }}/>
+                            <span className="bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.1] text-zinc-300 text-xs px-3 py-1.5 rounded-lg inline-block">
+                              {estaSubiendo ? 'Subiendo...' : doc.estado === 'RECHAZADO' ? 'Resubir' : 'Subir archivo'}
+                            </span>
+                          </label>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </>
+        )}
+
         {error && (
           <div className="mt-4 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
             <span className="text-red-400 text-sm">{error}</span>
