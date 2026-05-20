@@ -24,9 +24,14 @@ export default function ProveedorPortalPage() {
   const [loadingOp, setLoadingOp] = useState(false)
 
   useEffect(() => {
-    // Escuchar cambios de sesión — esto se dispara cuando el login termina
+    // Timeout de seguridad — si en 5 segundos no hay sesión, ir al login
+    const timeout = setTimeout(() => {
+      if (loading) window.location.replace('/proveedor/login')
+    }, 5000)
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        clearTimeout(timeout)
         if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
           if (session?.user) {
             await cargarDatos(session.user.id)
@@ -38,7 +43,7 @@ export default function ProveedorPortalPage() {
         }
       }
     )
-    return () => subscription.unsubscribe()
+    return () => { subscription.unsubscribe(); clearTimeout(timeout) }
   }, [])
 
   async function cargarDatos(userId: string) {
