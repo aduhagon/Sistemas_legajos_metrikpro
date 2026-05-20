@@ -25,19 +25,8 @@ export default function ProveedorLoginPage() {
       return
     }
 
-    // Verificar que es proveedor usando función SECURITY DEFINER (bypasea RLS)
-    const { data: provData, error: provErr } = await supabase
-      .rpc('verificar_proveedor_usuario', { p_user_id: data.user.id })
-
-    if (provErr || !provData) {
-      await supabase.auth.signOut()
-      setError('Esta cuenta no está asociada a ningún proveedor')
-      setLoading(false)
-      return
-    }
-
-    // Redirigir con recarga completa
-    window.location.replace('/proveedor/portal')
+    // Redirigir — el portal verifica si es proveedor
+    window.location.href = '/proveedor/portal'
   }
 
   async function handleRecuperar(e: React.FormEvent) {
@@ -56,7 +45,6 @@ export default function ProveedorLoginPage() {
   }
 
   const inputCls = "w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-4 py-2.5 text-white placeholder:text-zinc-600 text-sm focus:outline-none focus:border-blue-500/60 transition-all"
-
   const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
   const mostrarExito = params?.get('msg') === 'password_actualizado'
 
@@ -121,7 +109,7 @@ export default function ProveedorLoginPage() {
                 {error && <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2"><span className="text-red-400 text-sm">{error}</span></div>}
                 <button type="submit" disabled={loading}
                   className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-medium rounded-lg py-2.5 text-sm transition-colors">
-                  {loading ? 'Verificando...' : 'Ingresar'}
+                  {loading ? 'Ingresando...' : 'Ingresar'}
                 </button>
               </form>
               <div className="mt-4 text-center">

@@ -21,16 +21,15 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  const { data: { user } } = await supabase.auth.getUser()
+  // IMPORTANTE: esto refresca el token si está por expirar y sincroniza las cookies
+  await supabase.auth.getUser()
+
   const path = request.nextUrl.pathname
 
-  // Solo proteger el dashboard interno
-  if (path.startsWith('/dashboard') && !user) {
-    return NextResponse.redirect(new URL('/login', request.url))
+  if (path.startsWith('/dashboard')) {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.redirect(new URL('/login', request.url))
   }
-
-  // El portal del proveedor se protege desde el componente, no desde el middleware
-  // Esto evita loops de redirección cuando el cliente tiene sesión en cookies del browser
 
   return response
 }
