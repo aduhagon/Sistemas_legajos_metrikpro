@@ -18,22 +18,26 @@ export async function GET(req: Request) {
 
   const resultados = { vencidos: 0, porVencer: 0, emailsEnviados: 0, errores: [] as string[] }
 
-  // Obtener config SMTP
+  // Obtener config SMTP — sin smtp_password (cifrado en BD)
   const { data: grupo } = await supabase.from('grupos_trabajo').select('id').eq('slug', 'metrikpro').single()
   const { data: config } = await supabase
     .from('grupos_config')
-    .select('smtp_host, smtp_port, smtp_user, smtp_password, smtp_from_name, smtp_from_email, notif_evaluador_email')
+    .select('smtp_host, smtp_port, smtp_user, smtp_from_name, smtp_from_email, notif_evaluador_email')
     .eq('grupo_id', grupo?.id)
     .single()
 
-  const smtpOk = config?.smtp_user && config?.smtp_password
+  // Descifrar contraseña desde Vault
+  const { data: smtpPassword } = await supabase
+    .rpc('fn_smtp_get_password', { p_grupo_id: grupo?.id })
+
+  const smtpOk = config?.smtp_user && smtpPassword
 
   function crearTransporter() {
     return nodemailer.createTransport({
       host: config?.smtp_host || 'smtp.gmail.com',
       port: Number(config?.smtp_port) || 587,
       secure: false,
-      auth: { user: config!.smtp_user, pass: config!.smtp_password },
+      auth: { user: config!.smtp_user, pass: smtpPassword },
     })
   }
 
@@ -53,29 +57,23 @@ export async function GET(req: Request) {
   if (docsVencidos?.length) {
     for (const doc of docsVencidos) {
       const prov = doc.proveedores as any
-      // Marcar vencido
       await supabase.from('documentos_legajo')
         .update({ estado: 'VENCIDO', updated_at: new Date().toISOString() })
         .eq('id', doc.id)
-      // Suspender habilitación
       await supabase.from('habilitaciones')
         .update({ estado: 'DOC_PENDIENTE', updated_at: new Date().toISOString() })
         .eq('proveedor_id', prov?.id).eq('estado', 'VIGENTE')
-      // Proveedor vuelve a EN_REVISION
       await supabase.from('proveedores')
         .update({ estado: 'EN_REVISION', updated_at: new Date().toISOString() })
         .eq('id', prov?.id).eq('estado', 'APROBADO')
-
       resultados.vencidos++
     }
 
-    // Email URGENTE al evaluador interno (siempre)
     if (smtpOk && config?.notif_evaluador_email) {
       try {
         const lista = docsVencidos.map((d: any) =>
           `<li><strong>${d.proveedores?.razon_social}</strong> — ${d.documentos_requeridos?.nombre} (venció el ${new Date(d.fecha_venc).toLocaleDateString('es-AR')})</li>`
         ).join('')
-
         await crearTransporter().sendMail({
           from, to: config.notif_evaluador_email,
           subject: `🔴 URGENTE: ${docsVencidos.length} documento(s) vencido(s) — Sistema Legajos`,
@@ -90,7 +88,6 @@ export async function GET(req: Request) {
       } catch (e: any) { resultados.errores.push(`Email vencidos evaluador: ${e.message}`) }
     }
 
-    // Email al proveedor — SOLO si eligió recibir alertas (notif_vencimientos = true)
     if (smtpOk) {
       const proveedoresNotif = Array.from(new Map(
         docsVencidos
@@ -133,14 +130,12 @@ export async function GET(req: Request) {
     .in('estado', ['CARGADO', 'APROBADO'])
 
   if (docsPorVencer?.length) {
-    // Email resumen al evaluador interno (siempre)
     if (smtpOk && config?.notif_evaluador_email) {
       try {
         const lista = docsPorVencer.map((d: any) => {
           const dias = Math.ceil((new Date(d.fecha_venc).getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24))
           return `<li><strong>${(d.proveedores as any)?.razon_social}</strong> — ${(d.documentos_requeridos as any)?.nombre} <span style="color:#d97706">(en ${dias} día${dias !== 1 ? 's' : ''})</span></li>`
         }).join('')
-
         await crearTransporter().sendMail({
           from, to: config.notif_evaluador_email,
           subject: `⚠️ ${docsPorVencer.length} documento(s) por vencer esta semana — Sistema Legajos`,
@@ -155,7 +150,6 @@ export async function GET(req: Request) {
       } catch (e: any) { resultados.errores.push(`Email por vencer evaluador: ${e.message}`) }
     }
 
-    // Email al proveedor — SOLO si eligió recibir alertas
     if (smtpOk) {
       const proveedoresNotif = Array.from(new Map(
         docsPorVencer
@@ -188,7 +182,6 @@ export async function GET(req: Request) {
     resultados.porVencer = docsPorVencer.length
   }
 
-  // Log en audit
   await supabase.rpc('log_auditoria', {
     p_user_id: null,
     p_entidad: 'sistema',

@@ -8,7 +8,6 @@ type Config = {
   smtp_host: string
   smtp_port: number
   smtp_user: string
-  smtp_password: string
   smtp_from_name: string
   smtp_from_email: string
   notif_evaluador_email: string
@@ -19,7 +18,7 @@ export default function ConfigForm({ config }: { config: Config }) {
     smtp_host:             config?.smtp_host             ?? 'smtp.gmail.com',
     smtp_port:             config?.smtp_port             ?? 587,
     smtp_user:             config?.smtp_user             ?? '',
-    smtp_password:         config?.smtp_password         ?? '',
+    smtp_password:         '',   // siempre vacío al cargar — nunca exponemos el valor cifrado
     smtp_from_name:        config?.smtp_from_name        ?? 'Sistema Legajos',
     smtp_from_email:       config?.smtp_from_email       ?? '',
     notif_evaluador_email: config?.notif_evaluador_email ?? '',
@@ -39,19 +38,31 @@ export default function ConfigForm({ config }: { config: Config }) {
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
+
+    // 1. Guardar campos no sensibles directo en la tabla
     await supabase
       .from('grupos_config')
       .update({
         smtp_host:             form.smtp_host,
         smtp_port:             Number(form.smtp_port),
         smtp_user:             form.smtp_user,
-        smtp_password:         form.smtp_password,
         smtp_from_name:        form.smtp_from_name,
         smtp_from_email:       form.smtp_from_email,
         notif_evaluador_email: form.notif_evaluador_email,
         updated_at:            new Date().toISOString(),
       })
       .eq('grupo_id', config?.grupo_id)
+
+    // 2. Si ingresaron una nueva contraseña, cifrarla vía fn_smtp_set_password
+    if (form.smtp_password.trim()) {
+      await supabase.rpc('fn_smtp_set_password', {
+        p_grupo_id: config?.grupo_id,
+        p_password: form.smtp_password,
+      })
+      // Limpiar el campo después de guardar
+      setForm(f => ({ ...f, smtp_password: '' }))
+    }
+
     setSaving(false)
     setSaved(true)
   }
@@ -60,10 +71,21 @@ export default function ConfigForm({ config }: { config: Config }) {
     setTesting(true)
     setTestResult(null)
     try {
+      // El test lo maneja el server — él descifra la contraseña desde Vault
       const res = await fetch('/api/email/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          smtp_host:             form.smtp_host,
+          smtp_port:             form.smtp_port,
+          smtp_user:             form.smtp_user,
+          smtp_from_name:        form.smtp_from_name,
+          smtp_from_email:       form.smtp_from_email,
+          notif_evaluador_email: form.notif_evaluador_email,
+          grupo_id:              config?.grupo_id,
+          // solo enviar password si el usuario lo ingresó explícitamente
+          ...(form.smtp_password.trim() ? { smtp_password: form.smtp_password } : {}),
+        }),
       })
       const data = await res.json()
       setTestResult(data.ok
@@ -112,11 +134,16 @@ export default function ConfigForm({ config }: { config: Config }) {
               className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500/60 transition-all" />
           </div>
           <div>
-            <label className="block text-zinc-400 text-xs mb-1.5">Contraseña / App Password</label>
+            <label className="block text-zinc-400 text-xs mb-1.5">
+              Contraseña / App Password
+              {config?.smtp_user && (
+                <span className="ml-2 text-green-400 text-xs">● cifrada</span>
+              )}
+            </label>
             <div className="relative">
               <input name="smtp_password" value={form.smtp_password} onChange={handleChange}
                 type={showPass ? 'text' : 'password'}
-                placeholder="xxxx xxxx xxxx xxxx"
+                placeholder={config?.smtp_user ? 'Dejar vacío para mantener la actual' : 'xxxx xxxx xxxx xxxx'}
                 className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500/60 transition-all pr-8" />
               <button type="button" onClick={() => setShowPass(!showPass)}
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300">
@@ -151,14 +178,12 @@ export default function ConfigForm({ config }: { config: Config }) {
       <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-6">
         <h2 className="text-sm font-medium mb-1">Notificaciones</h2>
         <p className="text-zinc-500 text-xs mb-5">Email que recibe las alertas de legajos nuevos y eventos del sistema.</p>
-
         <div>
           <label className="block text-zinc-400 text-xs mb-1.5">Email del evaluador / administrador</label>
           <input name="notif_evaluador_email" value={form.notif_evaluador_email} onChange={handleChange} type="email"
             placeholder="evaluador@empresa.com"
             className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500/60 transition-all" />
         </div>
-
         <div className="mt-4 bg-white/[0.02] border border-white/[0.06] rounded-xl p-4">
           <p className="text-zinc-500 text-xs font-medium mb-2">Emails que se envían automáticamente</p>
           <ul className="space-y-1.5 text-xs text-zinc-500">
@@ -186,7 +211,8 @@ export default function ConfigForm({ config }: { config: Config }) {
           className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-medium rounded-lg px-5 py-2.5 text-sm transition-colors">
           {saving ? 'Guardando...' : saved ? '✓ Guardado' : 'Guardar cambios'}
         </button>
-        <button type="button" onClick={handleTest} disabled={testing || !form.smtp_user || !form.notif_evaluador_email}
+        <button type="button" onClick={handleTest}
+          disabled={testing || !form.smtp_user || !form.notif_evaluador_email}
           className="bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.1] text-zinc-300 font-medium rounded-lg px-5 py-2.5 text-sm transition-colors disabled:opacity-40">
           {testing ? 'Enviando...' : 'Enviar email de prueba'}
         </button>

@@ -1,19 +1,38 @@
 import { NextResponse } from 'next/server'
 import nodemailer from 'nodemailer'
+import { createClient } from '@/lib/supabase-server'
 
 export async function POST(req: Request) {
   try {
-    const { smtp_host, smtp_port, smtp_user, smtp_password, smtp_from_name, smtp_from_email, notif_evaluador_email } = await req.json()
+    const body = await req.json()
+    const {
+      smtp_host, smtp_port, smtp_user, smtp_from_name,
+      smtp_from_email, notif_evaluador_email,
+      grupo_id,
+      smtp_password: passwordDelForm, // solo presente si el usuario lo cambió
+    } = body
 
-    if (!smtp_user || !smtp_password || !notif_evaluador_email) {
-      return NextResponse.json({ ok: false, error: 'Completá usuario, contraseña y email del evaluador' })
+    if (!smtp_user || !notif_evaluador_email) {
+      return NextResponse.json({ ok: false, error: 'Completá usuario y email del evaluador' })
+    }
+
+    // Resolver contraseña: si vino en el form usarla, sino descifrar desde Vault
+    let password = passwordDelForm
+    if (!password && grupo_id) {
+      const supabase = createClient()
+      const { data } = await supabase.rpc('fn_smtp_get_password', { p_grupo_id: grupo_id })
+      password = data
+    }
+
+    if (!password) {
+      return NextResponse.json({ ok: false, error: 'No hay contraseña SMTP configurada' })
     }
 
     const transporter = nodemailer.createTransport({
       host: smtp_host || 'smtp.gmail.com',
       port: Number(smtp_port) || 587,
       secure: false,
-      auth: { user: smtp_user, pass: smtp_password },
+      auth: { user: smtp_user, pass: password },
     })
 
     await transporter.sendMail({

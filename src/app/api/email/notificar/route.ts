@@ -14,14 +14,23 @@ export async function POST(req: Request) {
       .eq('slug', 'metrikpro')
       .single()
 
+    // Leer config SMTP — sin smtp_password (está cifrado en la BD)
     const { data: config } = await supabase
       .from('grupos_config')
-      .select('smtp_host, smtp_port, smtp_user, smtp_password, smtp_from_name, smtp_from_email, notif_evaluador_email')
+      .select('smtp_host, smtp_port, smtp_user, smtp_from_name, smtp_from_email, notif_evaluador_email')
       .eq('grupo_id', grupo?.id)
       .single()
 
-    if (!config?.smtp_user || !config?.smtp_password) {
+    if (!config?.smtp_user) {
       return NextResponse.json({ ok: false, error: 'SMTP no configurado' })
+    }
+
+    // Descifrar contraseña desde Vault vía función de BD (solo service_role puede llamarla)
+    const { data: smtpPassword, error: pwErr } = await supabase
+      .rpc('fn_smtp_get_password', { p_grupo_id: grupo?.id })
+
+    if (pwErr || !smtpPassword) {
+      return NextResponse.json({ ok: false, error: 'No se pudo obtener la contraseña SMTP' })
     }
 
     const { data: proveedor } = await supabase
@@ -36,7 +45,7 @@ export async function POST(req: Request) {
       host: config.smtp_host || 'smtp.gmail.com',
       port: Number(config.smtp_port) || 587,
       secure: false,
-      auth: { user: config.smtp_user, pass: config.smtp_password },
+      auth: { user: config.smtp_user, pass: smtpPassword },
     })
 
     const from = `"${config.smtp_from_name || 'Sistema Legajos'}" <${config.smtp_from_email || config.smtp_user}>`
