@@ -4,7 +4,9 @@ import { useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase-client'
 import { QRCodeSVG } from 'qrcode.react'
 
-type Vista = 'qr' | 'docs' | 'operarios' | 'historial' | 'perfil'
+// 'historial' = historial de documentos (aprobaciones, rechazos, cargas)
+// 'accesos'   = registros de ingreso/egreso GPS
+type Vista = 'qr' | 'docs' | 'operarios' | 'historial' | 'accesos' | 'perfil'
 
 type Props = {
   proveedor: any
@@ -12,7 +14,7 @@ type Props = {
   habilitacion: any
   operarios: any[]
   accesos: any[]
-  historialPorDoc: Record<string, any[]>   // ← NUEVO
+  historialPorDoc: Record<string, any[]>
   miRol: 'titular' | 'operario'
 }
 
@@ -22,7 +24,7 @@ export default function PortalClient({
   habilitacion,
   operarios: opsInit,
   accesos,
-  historialPorDoc,                          // ← NUEVO
+  historialPorDoc,
   miRol,
 }: Props) {
   const [proveedor] = useState(provInit)
@@ -211,22 +213,43 @@ export default function PortalClient({
     color === 'orange' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' :
     'bg-zinc-500/10 text-zinc-500 border-zinc-500/20'
 
-  // Etiquetas amigables para el proveedor (sin jerga interna)
+  // Aplanar y ordenar todo el historial cronológico inverso para la tab "Historial"
+  const historialCompleto = Object.entries(historialPorDoc)
+    .flatMap(([docId, eventos]) => {
+      const doc = docs.find((d: any) => d.id === docId)
+      const nombreDoc = doc?.documentos_requeridos?.nombre ?? 'Documento'
+      const codigoDoc = doc?.documentos_requeridos?.codigo ?? ''
+      return eventos.map(ev => ({ ...ev, nombreDoc, codigoDoc }))
+    })
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
   const actorLabel: Record<string, string> = {
     proveedor: 'Vos',
     evaluador: 'Evaluador',
     sistema:   'Sistema',
   }
 
-  const estadoLabel: Record<string, string> = {
-    PENDIENTE: 'pendiente',
-    CARGADO:   'cargado',
-    APROBADO:  'aprobado ✓',
-    RECHAZADO: 'rechazado',
-    VENCIDO:   'vencido',
+  const estadoLabel: Record<string, { text: string; color: string }> = {
+    PENDIENTE: { text: 'pendiente',   color: 'text-zinc-400' },
+    CARGADO:   { text: 'cargado',     color: 'text-blue-400' },
+    APROBADO:  { text: 'aprobado ✓',  color: 'text-green-400' },
+    RECHAZADO: { text: 'rechazado',   color: 'text-red-400' },
+    VENCIDO:   { text: 'vencido',     color: 'text-orange-400' },
   }
 
-  // ── OPERARIO ──
+  // Tabs que se muestran (sin QR — ese es el botón "← Mi QR")
+  const tabs = [
+    { key: 'docs',      label: `Documentos` },
+    { key: 'historial', label: 'Historial' },
+    { key: 'operarios', label: 'Equipo' },
+    { key: 'accesos',   label: 'Accesos' },
+    { key: 'perfil',    label: 'Perfil' },
+  ]
+
+  const docsConProblemas = docs.filter((d: any) => ['RECHAZADO', 'VENCIDO'].includes(d.estado)).length
+  const docsCompletos    = docs.filter((d: any) => ['CARGADO', 'APROBADO'].includes(d.estado)).length
+
+  // ── OPERARIO: solo muestra QR ──
   if (miRol === 'operario') {
     return (
       <div className="min-h-screen bg-[#0f1117] text-white flex flex-col">
@@ -255,9 +278,6 @@ export default function PortalClient({
   }
 
   // ── TITULAR ──
-  const docsConProblemas = docs.filter((d: any) => ['RECHAZADO', 'VENCIDO'].includes(d.estado)).length
-  const docsCompletos = docs.filter((d: any) => ['CARGADO', 'APROBADO'].includes(d.estado)).length
-
   return (
     <div className="min-h-screen bg-[#0f1117] text-white">
       <nav className="border-b border-white/[0.06] bg-[#0a0c12]/80 backdrop-blur sticky top-0 z-50">
@@ -281,6 +301,8 @@ export default function PortalClient({
       </nav>
 
       <div className="max-w-lg mx-auto px-4 py-6">
+
+        {/* ── VISTA QR ── */}
         {vista === 'qr' && habilitacion && (
           <div className="flex flex-col items-center">
             <div className="flex items-center gap-2 mb-6">
@@ -297,24 +319,22 @@ export default function PortalClient({
             <div className="bg-white/[0.03] border border-white/[0.06] rounded-2xl px-5 py-4 w-full text-center mt-6 mb-6">
               <p className="text-zinc-400 text-sm">Mostrá este código al operador para registrar tu ingreso o egreso</p>
             </div>
+            {/* Tabs secundarias desde QR */}
             <div className="flex gap-1 w-full bg-white/[0.03] border border-white/[0.06] rounded-xl p-1">
-              {[
-                { key: 'docs', label: `Documentos${docsConProblemas > 0 ? ' ⚠' : ''}` },
-                { key: 'operarios', label: `Equipo (${operarios.filter((o: any) => o.rol === 'operario').length})` },
-                { key: 'historial', label: 'Historial' },
-                { key: 'perfil', label: 'Perfil' },
-              ].map((t: any) => (
+              {tabs.map(t => (
                 <button key={t.key} onClick={() => setVista(t.key as Vista)}
                   className="flex-1 py-1.5 rounded-lg text-xs font-medium text-zinc-500 hover:text-zinc-300 transition-all">
-                  {t.label}
+                  {t.key === 'docs' && docsConProblemas > 0 ? `Docs ⚠` : t.label}
                 </button>
               ))}
             </div>
           </div>
         )}
 
+        {/* ── VISTAS SECUNDARIAS ── */}
         {vista !== 'qr' && (
           <>
+            {/* Header resumen */}
             <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-5 mb-4">
               <div className="flex items-start justify-between mb-3">
                 <div>
@@ -337,6 +357,7 @@ export default function PortalClient({
               </div>
             </div>
 
+            {/* Tabs */}
             <div className="flex gap-1 mb-4 bg-white/[0.03] border border-white/[0.06] rounded-xl p-1">
               {habilitacion && (
                 <button onClick={() => setVista('qr')}
@@ -344,15 +365,17 @@ export default function PortalClient({
                   ← Mi QR
                 </button>
               )}
-              {(['docs', 'operarios', 'historial', 'perfil'] as Vista[]).map(t => (
-                <button key={t} onClick={() => setVista(t)}
-                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${vista === t ? 'bg-white/[0.08] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>
-                  {t === 'docs' ? 'Documentos' : t === 'operarios' ? 'Equipo' : t === 'historial' ? 'Historial' : 'Perfil'}
+              {tabs.map(t => (
+                <button key={t.key} onClick={() => setVista(t.key as Vista)}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    vista === t.key ? 'bg-white/[0.08] text-white' : 'text-zinc-500 hover:text-zinc-300'
+                  }`}>
+                  {t.key === 'docs' && docsConProblemas > 0 ? 'Docs ⚠' : t.label}
                 </button>
               ))}
             </div>
 
-            {/* ── DOCUMENTOS con historial ── */}
+            {/* ── DOCUMENTOS ── */}
             {vista === 'docs' && (
               <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
                 <div className="px-5 py-4 border-b border-white/[0.06]">
@@ -365,11 +388,8 @@ export default function PortalClient({
                     const dcfg = estadoDocCfg[doc.estado] ?? estadoDocCfg.PENDIENTE
                     const estaSubiendo = subiendo === doc.id
                     const necesitaFecha = dr?.tipo_vigencia !== 'PERMANENTE'
-                    const historial = historialPorDoc[doc.id] ?? []
-
                     return (
                       <div key={doc.id} className="px-5 py-4">
-                        {/* Cabecera del documento */}
                         <div className="flex items-start justify-between gap-4 mb-2">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-0.5">
@@ -399,41 +419,6 @@ export default function PortalClient({
                             )}
                           </div>
                         </div>
-
-                        {/* Historial del documento */}
-                        {historial.length > 0 && (
-                          <div className="mt-2 mb-3 pl-3 border-l-2 border-white/[0.06] space-y-1.5">
-                            {historial.map((h: any) => {
-                              const esRechazo = h.estado_nuevo === 'RECHAZADO'
-                              const esAprobado = h.estado_nuevo === 'APROBADO'
-                              return (
-                                <div key={h.id} className="flex items-start gap-2 text-xs flex-wrap">
-                                  <span className={`shrink-0 px-1.5 py-0.5 rounded text-xs ${
-                                    h.actor_tipo === 'proveedor' ? 'bg-blue-500/10 text-blue-400' :
-                                    h.actor_tipo === 'evaluador' ? 'bg-purple-500/10 text-purple-400' :
-                                    'bg-zinc-500/10 text-zinc-500'
-                                  }`}>
-                                    {actorLabel[h.actor_tipo] ?? h.actor_tipo}
-                                  </span>
-                                  <span className={`${esAprobado ? 'text-green-400' : esRechazo ? 'text-red-400' : 'text-zinc-400'}`}>
-                                    {estadoLabel[h.estado_nuevo] ?? h.estado_nuevo}
-                                  </span>
-                                  {h.observaciones && (
-                                    <span className="text-orange-300 italic">— "{h.observaciones}"</span>
-                                  )}
-                                  <span className="text-zinc-700 ml-auto shrink-0">
-                                    {new Date(h.created_at).toLocaleString('es-AR', {
-                                      day: '2-digit', month: '2-digit',
-                                      hour: '2-digit', minute: '2-digit'
-                                    })}
-                                  </span>
-                                </div>
-                              )
-                            })}
-                          </div>
-                        )}
-
-                        {/* Upload / fecha */}
                         {doc.estado !== 'APROBADO' && (
                           <div className="flex items-center gap-2 mt-2 flex-wrap">
                             {necesitaFecha && (
@@ -458,7 +443,72 @@ export default function PortalClient({
               </div>
             )}
 
-            {/* ── OPERARIOS ── */}
+            {/* ── HISTORIAL DE DOCUMENTOS ── */}
+            {vista === 'historial' && (
+              <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
+                <div className="px-5 py-4 border-b border-white/[0.06]">
+                  <h3 className="text-sm font-medium">Historial de documentos</h3>
+                  <p className="text-zinc-500 text-xs mt-0.5">Todas las acciones sobre tu documentación, del más reciente al más antiguo</p>
+                </div>
+                {historialCompleto.length === 0 ? (
+                  <div className="px-5 py-8 text-center">
+                    <p className="text-zinc-600 text-sm">Sin actividad registrada todavía</p>
+                    <p className="text-zinc-700 text-xs mt-1">El historial se genera al subir o revisar documentos</p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-white/[0.04]">
+                    {historialCompleto.map((ev: any) => {
+                      const cfg = estadoLabel[ev.estado_nuevo] ?? { text: ev.estado_nuevo, color: 'text-zinc-400' }
+                      const esRechazo = ev.estado_nuevo === 'RECHAZADO'
+                      return (
+                        <div key={ev.id} className="px-5 py-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              {/* Documento */}
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="text-zinc-600 text-xs font-mono shrink-0">{ev.codigoDoc}</span>
+                                <span className="text-zinc-300 text-sm truncate">{ev.nombreDoc}</span>
+                              </div>
+                              {/* Evento */}
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                  ev.actor_tipo === 'proveedor' ? 'bg-blue-500/10 text-blue-400' :
+                                  ev.actor_tipo === 'evaluador' ? 'bg-purple-500/10 text-purple-400' :
+                                  'bg-zinc-500/10 text-zinc-500'
+                                }`}>
+                                  {actorLabel[ev.actor_tipo] ?? ev.actor_tipo}
+                                </span>
+                                <span className={`text-xs font-medium ${cfg.color}`}>{cfg.text}</span>
+                                {ev.observaciones && (
+                                  <span className="text-orange-300 text-xs italic">— "{ev.observaciones}"</span>
+                                )}
+                              </div>
+                              {/* Alerta si fue rechazado */}
+                              {esRechazo && ev.observaciones && (
+                                <div className="mt-1.5 bg-red-500/5 border border-red-500/15 rounded-lg px-3 py-1.5">
+                                  <p className="text-red-300 text-xs">Motivo: {ev.observaciones}</p>
+                                </div>
+                              )}
+                            </div>
+                            {/* Fecha */}
+                            <div className="text-right shrink-0">
+                              <p className="text-zinc-500 text-xs">
+                                {new Date(ev.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+                              </p>
+                              <p className="text-zinc-700 text-xs">
+                                {new Date(ev.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── EQUIPO / OPERARIOS ── */}
             {vista === 'operarios' && (
               <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
                 <div className="px-5 py-4 border-b border-white/[0.06]">
@@ -564,11 +614,12 @@ export default function PortalClient({
               </div>
             )}
 
-            {/* ── HISTORIAL DE ACCESOS ── */}
-            {vista === 'historial' && (
+            {/* ── ACCESOS GPS ── */}
+            {vista === 'accesos' && (
               <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
                 <div className="px-5 py-4 border-b border-white/[0.06]">
                   <h3 className="text-sm font-medium">Registros de acceso</h3>
+                  <p className="text-zinc-500 text-xs mt-0.5">Ingresos y egresos registrados en los establecimientos</p>
                 </div>
                 {accesos.length === 0 ? (
                   <div className="px-5 py-8 text-center"><p className="text-zinc-600 text-sm">Sin registros todavía</p></div>
@@ -607,10 +658,10 @@ export default function PortalClient({
                 <div className="space-y-3">
                   {[
                     { label: 'Razón social', value: proveedor?.razon_social },
-                    { label: 'CUIT', value: proveedor?.cuit },
-                    { label: 'Email', value: proveedor?.email },
-                    { label: 'Teléfono', value: proveedor?.telefono ?? '—' },
-                    { label: 'Rubro', value: (proveedor?.rubros as any)?.nombre },
+                    { label: 'CUIT',         value: proveedor?.cuit },
+                    { label: 'Email',        value: proveedor?.email },
+                    { label: 'Teléfono',     value: proveedor?.telefono ?? '—' },
+                    { label: 'Rubro',        value: (proveedor?.rubros as any)?.nombre },
                   ].map(({ label, value }) => (
                     <div key={label} className="flex items-center justify-between">
                       <span className="text-zinc-500 text-sm">{label}</span>
