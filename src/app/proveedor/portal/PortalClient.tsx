@@ -12,10 +12,19 @@ type Props = {
   habilitacion: any
   operarios: any[]
   accesos: any[]
+  historialPorDoc: Record<string, any[]>   // ← NUEVO
   miRol: 'titular' | 'operario'
 }
 
-export default function PortalClient({ proveedor: provInit, docs: docsInit, habilitacion, operarios: opsInit, accesos, miRol }: Props) {
+export default function PortalClient({
+  proveedor: provInit,
+  docs: docsInit,
+  habilitacion,
+  operarios: opsInit,
+  accesos,
+  historialPorDoc,                          // ← NUEVO
+  miRol,
+}: Props) {
   const [proveedor] = useState(provInit)
   const [docs, setDocs] = useState(docsInit)
   const [operarios, setOperarios] = useState(opsInit)
@@ -77,25 +86,20 @@ export default function PortalClient({ proveedor: provInit, docs: docsInit, habi
     e.preventDefault()
     setLoadingOp(true)
     setError('')
-
     const { data: result, error: rpcErr } = await supabase.rpc('invitar_operario', {
       p_proveedor_id: proveedor.id,
       p_email: nuevoOperario.email,
       p_nombre: nuevoOperario.nombre,
       p_cuil: nuevoOperario.cuil || null,
     })
-
     if (rpcErr || result?.error) {
       setError(result?.error ?? rpcErr?.message ?? 'Error al agregar operario')
       setLoadingOp(false)
       return
     }
-
-    // Enviar email de recovery para definir contraseña
     await supabase.auth.resetPasswordForEmail(nuevoOperario.email, {
       redirectTo: `${window.location.origin}/auth/proveedor-callback?type=recovery`,
     })
-
     setOperarios(prev => [...prev, {
       id: result.user_id, rol: 'operario',
       nombre: nuevoOperario.nombre, cuil: nuevoOperario.cuil,
@@ -113,17 +117,14 @@ export default function PortalClient({ proveedor: provInit, docs: docsInit, habi
 
   async function eliminarOperario(opId: string, nombre: string) {
     if (!confirm(`¿Eliminar a ${nombre}? Esto borra la cuenta y libera el email para volver a usar.`)) return
-
     const { data: result, error: rpcErr } = await supabase.rpc('eliminar_operario', {
       p_proveedor_id: proveedor.id,
       p_operario_id: opId,
     })
-
     if (rpcErr || result?.error) {
       setError(result?.error ?? rpcErr?.message ?? 'Error al eliminar')
       return
     }
-
     setOperarios(prev => prev.filter((o: any) => o.id !== opId))
   }
 
@@ -131,18 +132,13 @@ export default function PortalClient({ proveedor: provInit, docs: docsInit, habi
     setImportando(true)
     setError('')
     setResultadoImport(null)
-
     try {
-      // Cargar SheetJS dinámicamente
       const XLSX = await import('xlsx')
       const buffer = await file.arrayBuffer()
       const workbook = XLSX.read(buffer, { type: 'array' })
       const sheet = workbook.Sheets[workbook.SheetNames[0]]
       const rows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' })
-
-      // Normalizar nombres de columnas (case-insensitive, sin acentos)
       const normalizar = (s: string) => s.toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
-      
       const operariosData = rows.map((row: any) => {
         const keys = Object.keys(row)
         const findKey = (variants: string[]) => keys.find(k => variants.includes(normalizar(k))) ?? ''
@@ -152,37 +148,29 @@ export default function PortalClient({ proveedor: provInit, docs: docsInit, habi
           email: (row[findKey(['email', 'mail', 'correo'])] || '').toString().trim(),
         }
       }).filter(op => op.email && op.nombre)
-
       if (operariosData.length === 0) {
-        setError('No se encontraron filas con Nombre y Email. Verificá las columnas del Excel.')
+        setError('No se encontraron filas con Nombre y Email.')
         setImportando(false)
         return
       }
-
       const { data: result, error: rpcErr } = await supabase.rpc('importar_operarios_masivo', {
         p_proveedor_id: proveedor.id,
         p_operarios: operariosData,
       })
-
       if (rpcErr || result?.error) {
         setError(result?.error ?? rpcErr?.message ?? 'Error al importar')
         setImportando(false)
         return
       }
-
-      // Enviar emails de recovery a los creados
       for (const op of operariosData) {
         await supabase.auth.resetPasswordForEmail(op.email, {
           redirectTo: `${window.location.origin}/auth/proveedor-callback?type=recovery`,
         }).catch(() => {})
       }
-
-      // Recargar lista de operarios
       const { data: opsActuales } = await supabase
         .from('proveedores_usuarios')
         .select('id, rol, nombre, cuil, activo, user_id')
         .eq('proveedor_id', proveedor.id)
-      
       setOperarios(opsActuales ?? [])
       setResultadoImport(result)
     } catch (err: any) {
@@ -222,6 +210,21 @@ export default function PortalClient({ proveedor: provInit, docs: docsInit, habi
     color === 'red'    ? 'bg-red-500/10 text-red-400 border-red-500/20' :
     color === 'orange' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' :
     'bg-zinc-500/10 text-zinc-500 border-zinc-500/20'
+
+  // Etiquetas amigables para el proveedor (sin jerga interna)
+  const actorLabel: Record<string, string> = {
+    proveedor: 'Vos',
+    evaluador: 'Evaluador',
+    sistema:   'Sistema',
+  }
+
+  const estadoLabel: Record<string, string> = {
+    PENDIENTE: 'pendiente',
+    CARGADO:   'cargado',
+    APROBADO:  'aprobado ✓',
+    RECHAZADO: 'rechazado',
+    VENCIDO:   'vencido',
+  }
 
   // ── OPERARIO ──
   if (miRol === 'operario') {
@@ -349,10 +352,12 @@ export default function PortalClient({ proveedor: provInit, docs: docsInit, habi
               ))}
             </div>
 
+            {/* ── DOCUMENTOS con historial ── */}
             {vista === 'docs' && (
               <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
                 <div className="px-5 py-4 border-b border-white/[0.06]">
                   <h3 className="text-sm font-medium">Documentos requeridos</h3>
+                  <p className="text-zinc-500 text-xs mt-0.5">PDF, JPG o PNG — máx. 10MB · Ingresá la fecha antes de subir</p>
                 </div>
                 <div className="divide-y divide-white/[0.04]">
                   {docs.map((doc: any) => {
@@ -360,24 +365,75 @@ export default function PortalClient({ proveedor: provInit, docs: docsInit, habi
                     const dcfg = estadoDocCfg[doc.estado] ?? estadoDocCfg.PENDIENTE
                     const estaSubiendo = subiendo === doc.id
                     const necesitaFecha = dr?.tipo_vigencia !== 'PERMANENTE'
+                    const historial = historialPorDoc[doc.id] ?? []
+
                     return (
                       <div key={doc.id} className="px-5 py-4">
+                        {/* Cabecera del documento */}
                         <div className="flex items-start justify-between gap-4 mb-2">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-0.5">
-                              <span className="text-zinc-500 text-xs font-mono">{dr?.codigo}</span>
+                              <span className="text-zinc-500 text-xs font-mono shrink-0">{dr?.codigo}</span>
                               <span className="text-sm text-white truncate">{dr?.nombre}</span>
-                              {dr?.obligatorio && <span className="text-red-400 text-xs">*</span>}
+                              {dr?.obligatorio && <span className="text-red-400 text-xs shrink-0">*</span>}
                             </div>
                             <div className="flex items-center gap-3 flex-wrap">
                               <span className="text-zinc-600 text-xs">{dr?.tipo_vigencia}</span>
-                              {doc.fecha_venc && <span className="text-zinc-500 text-xs">Vence: {new Date(doc.fecha_venc).toLocaleDateString('es-AR')}</span>}
+                              {doc.fecha_venc && (
+                                <span className="text-zinc-500 text-xs">Vence: {new Date(doc.fecha_venc).toLocaleDateString('es-AR')}</span>
+                              )}
                               {doc.observaciones && <span className="text-orange-400 text-xs">⚠ {doc.observaciones}</span>}
                               {uploadOk === doc.id && <span className="text-green-400 text-xs">✓ Subido</span>}
                             </div>
                           </div>
-                          <span className={`text-xs px-2 py-0.5 rounded-full border ${colorClass(dcfg.color)}`}>{dcfg.label}</span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className={`text-xs px-2 py-0.5 rounded-full border ${colorClass(dcfg.color)}`}>{dcfg.label}</span>
+                            {doc.archivo_url && (
+                              <a href={doc.archivo_url} target="_blank" rel="noopener noreferrer"
+                                className="text-zinc-500 hover:text-zinc-300 transition-colors">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                                  <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+                                </svg>
+                              </a>
+                            )}
+                          </div>
                         </div>
+
+                        {/* Historial del documento */}
+                        {historial.length > 0 && (
+                          <div className="mt-2 mb-3 pl-3 border-l-2 border-white/[0.06] space-y-1.5">
+                            {historial.map((h: any) => {
+                              const esRechazo = h.estado_nuevo === 'RECHAZADO'
+                              const esAprobado = h.estado_nuevo === 'APROBADO'
+                              return (
+                                <div key={h.id} className="flex items-start gap-2 text-xs flex-wrap">
+                                  <span className={`shrink-0 px-1.5 py-0.5 rounded text-xs ${
+                                    h.actor_tipo === 'proveedor' ? 'bg-blue-500/10 text-blue-400' :
+                                    h.actor_tipo === 'evaluador' ? 'bg-purple-500/10 text-purple-400' :
+                                    'bg-zinc-500/10 text-zinc-500'
+                                  }`}>
+                                    {actorLabel[h.actor_tipo] ?? h.actor_tipo}
+                                  </span>
+                                  <span className={`${esAprobado ? 'text-green-400' : esRechazo ? 'text-red-400' : 'text-zinc-400'}`}>
+                                    {estadoLabel[h.estado_nuevo] ?? h.estado_nuevo}
+                                  </span>
+                                  {h.observaciones && (
+                                    <span className="text-orange-300 italic">— "{h.observaciones}"</span>
+                                  )}
+                                  <span className="text-zinc-700 ml-auto shrink-0">
+                                    {new Date(h.created_at).toLocaleString('es-AR', {
+                                      day: '2-digit', month: '2-digit',
+                                      hour: '2-digit', minute: '2-digit'
+                                    })}
+                                  </span>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+
+                        {/* Upload / fecha */}
                         {doc.estado !== 'APROBADO' && (
                           <div className="flex items-center gap-2 mt-2 flex-wrap">
                             {necesitaFecha && (
@@ -402,6 +458,7 @@ export default function PortalClient({ proveedor: provInit, docs: docsInit, habi
               </div>
             )}
 
+            {/* ── OPERARIOS ── */}
             {vista === 'operarios' && (
               <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
                 <div className="px-5 py-4 border-b border-white/[0.06]">
@@ -411,8 +468,7 @@ export default function PortalClient({ proveedor: provInit, docs: docsInit, habi
                       <p className="text-zinc-500 text-xs mt-0.5">Cada operario recibe un email para definir su contraseña</p>
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => fileInputRef.current?.click()}
-                        disabled={importando}
+                      <button onClick={() => fileInputRef.current?.click()} disabled={importando}
                         className="bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.1] text-zinc-300 text-xs px-3 py-1.5 rounded-lg disabled:opacity-50">
                         {importando ? 'Importando...' : '↑ Importar Excel'}
                       </button>
@@ -435,15 +491,6 @@ export default function PortalClient({ proveedor: provInit, docs: docsInit, habi
                       ✓ {resultadoImport.creados} operarios agregados
                       {resultadoImport.omitidos > 0 && ` · ${resultadoImport.omitidos} omitidos`}
                     </p>
-                    {resultadoImport.errores?.length > 0 && (
-                      <div className="mt-2 space-y-1">
-                        {resultadoImport.errores.map((e: any, i: number) => (
-                          <p key={i} className="text-zinc-500 text-xs">
-                            {e.email}: {e.error}
-                          </p>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 )}
 
@@ -500,10 +547,10 @@ export default function PortalClient({ proveedor: provInit, docs: docsInit, habi
                             {op.activo ? 'Activo' : 'Inactivo'}
                           </button>
                           <button onClick={() => eliminarOperario(op.id, op.nombre)}
-                            title="Eliminar"
                             className="text-zinc-600 hover:text-red-400 transition-colors">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/>
+                              <polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/>
+                              <path d="M10 11v6M14 11v6"/>
                             </svg>
                           </button>
                         </div>
@@ -517,6 +564,7 @@ export default function PortalClient({ proveedor: provInit, docs: docsInit, habi
               </div>
             )}
 
+            {/* ── HISTORIAL DE ACCESOS ── */}
             {vista === 'historial' && (
               <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
                 <div className="px-5 py-4 border-b border-white/[0.06]">
@@ -536,6 +584,15 @@ export default function PortalClient({ proveedor: provInit, docs: docsInit, habi
                             {new Date(acc.created_at).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
                           </p>
                         </div>
+                        {acc.lat && acc.lng && (
+                          <a href={`https://maps.google.com/?q=${acc.lat},${acc.lng}`} target="_blank" rel="noopener noreferrer"
+                            className="text-zinc-600 hover:text-zinc-400 text-xs transition-colors flex items-center gap-1">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
+                            </svg>
+                            Ver mapa
+                          </a>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -543,6 +600,7 @@ export default function PortalClient({ proveedor: provInit, docs: docsInit, habi
               </div>
             )}
 
+            {/* ── PERFIL ── */}
             {vista === 'perfil' && (
               <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-5">
                 <h3 className="text-sm font-medium mb-4">Datos de la empresa</h3>

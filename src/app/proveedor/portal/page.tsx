@@ -42,6 +42,24 @@ export default async function ProveedorPortalPage() {
 
   if (!proveedor) redirect('/proveedor/login')
 
+  // Historial de documentos — agrupado por documento_id
+  const docIds = (docs ?? []).map((d: any) => d.id)
+  const { data: historialRaw } = docIds.length > 0
+    ? await supabase
+        .from('documentos_legajo_historial')
+        .select('id, documento_id, estado_anterior, estado_nuevo, actor_tipo, observaciones, created_at')
+        .in('documento_id', docIds)
+        .order('created_at', { ascending: true })
+    : { data: [] }
+
+  // Agrupar historial por documento_id
+  const historialPorDoc: Record<string, any[]> = {}
+  for (const h of historialRaw ?? []) {
+    if (!historialPorDoc[h.documento_id]) historialPorDoc[h.documento_id] = []
+    historialPorDoc[h.documento_id].push(h)
+  }
+
+  // Accesos
   let accesos: any[] = []
   if (habilitacion) {
     const { data: accData } = await supabase
@@ -60,6 +78,7 @@ export default async function ProveedorPortalPage() {
       habilitacion={habilitacion}
       operarios={operarios ?? []}
       accesos={accesos}
+      historialPorDoc={historialPorDoc}
       miRol={provVerif.rol}
     />
   )
