@@ -39,10 +39,11 @@ export default function Navbar({ nombre, rol }: Props) {
   ]
 
   const adminLinks = [
-    { href: '/dashboard/configuracion',        label: 'Configuración',      icono: '⚙️' },
-    { href: '/dashboard/admin/rubros',         label: 'Rubros y documentos', icono: '📄' },
-    { href: '/dashboard/admin/tipos',          label: 'Tipos de establecimiento', icono: '🏢' },
-    { href: '/dashboard/admin/establecimientos', label: 'Establecimientos',  icono: '📍' },
+    { href: '/dashboard/configuracion',          label: 'Configuración',        icono: '⚙️' },
+    { href: '/dashboard/admin/rubros',           label: 'Rubros y documentos',  icono: '📄' },
+    { href: '/dashboard/admin/tipos',            label: 'Tipos de establecimiento', icono: '🏢' },
+    { href: '/dashboard/admin/establecimientos', label: 'Establecimientos',     icono: '📍' },
+    { href: '/dashboard/admin/equipos',          label: 'Tipos de equipo',      icono: '🚗' },
   ]
 
   const esAdmin = rol === 'admin'
