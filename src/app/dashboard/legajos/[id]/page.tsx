@@ -3,13 +3,13 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import AccionesLegajo from './AccionesLegajo'
 import AccionesDocumento from './AccionesDocumento'
+import AccionesDocumentoEquipo from '@/components/AccionesDocumentoEquipo'
 
 export default async function LegajoDetallePage({ params }: { params: { id: string } }) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  // Query sin historial primero — más segura
   const { data: proveedor } = await supabase
     .from('proveedores')
     .select(`
@@ -26,19 +26,32 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
 
   if (!proveedor) redirect('/dashboard/legajos')
 
-  // Historial por separado — si falla no rompe la página
+  // Historial de documentos del legajo
   const { data: historialData } = await supabase
     .from('documentos_legajo_historial')
     .select('id, documento_id, estado_anterior, estado_nuevo, actor_tipo, observaciones, created_at')
     .in('documento_id', (proveedor.documentos_legajo as any[]).map((d: any) => d.id))
     .order('created_at', { ascending: true })
 
-  // Agrupar historial por documento_id
   const historialPorDoc: Record<string, any[]> = {}
   for (const h of historialData ?? []) {
     if (!historialPorDoc[h.documento_id]) historialPorDoc[h.documento_id] = []
     historialPorDoc[h.documento_id].push(h)
   }
+
+  // Equipos del proveedor con sus documentos
+  const { data: equipos } = await supabase
+    .from('equipos_contratista')
+    .select(`
+      id, dominio, marca, modelo, anio, estado,
+      tipos_equipo(nombre, icono),
+      documentos_equipo(
+        id, estado, fecha_venc, archivo_url, observaciones, updated_at,
+        documentos_requeridos_equipo(nombre, tipo_vigencia, obligatorio)
+      )
+    `)
+    .eq('proveedor_id', params.id)
+    .order('created_at', { ascending: false })
 
   const docs = (proveedor.documentos_legajo as any[]) ?? []
   const docsAprobados = docs.filter(d => d.estado === 'APROBADO').length
@@ -63,6 +76,13 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
     evaluador: 'bg-purple-500/10 text-purple-400',
     sistema:   'bg-zinc-500/10 text-zinc-500',
   }
+
+  // Stats de equipos
+  const equiposData = (equipos ?? []) as any[]
+  const equiposAprobados = equiposData.filter(e => e.estado === 'APROBADO').length
+  const equiposConDocs   = equiposData.filter(e =>
+    e.documentos_equipo?.some((d: any) => d.estado === 'CARGADO')
+  ).length
 
   return (
     <div className="max-w-4xl">
@@ -92,17 +112,17 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
       </div>
 
       {/* Info cards */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-4 gap-4 mb-6">
         <div className="bg-white/[0.03] border border-white/[0.08] rounded-xl p-4">
           <p className="text-zinc-500 text-xs mb-1">Email</p>
-          <p className="text-sm text-white">{proveedor.email}</p>
+          <p className="text-sm text-white truncate">{proveedor.email}</p>
         </div>
         <div className="bg-white/[0.03] border border-white/[0.08] rounded-xl p-4">
           <p className="text-zinc-500 text-xs mb-1">Teléfono</p>
           <p className="text-sm text-white">{proveedor.telefono ?? '—'}</p>
         </div>
         <div className="bg-white/[0.03] border border-white/[0.08] rounded-xl p-4">
-          <p className="text-zinc-500 text-xs mb-1">Documentación aprobada</p>
+          <p className="text-zinc-500 text-xs mb-1">Docs aprobados</p>
           <div className="flex items-center gap-2 mt-1">
             <div className="flex-1 h-1.5 bg-white/[0.08] rounded-full overflow-hidden">
               <div className="h-full bg-blue-500 rounded-full" style={{ width: `${progreso}%` }}/>
@@ -110,12 +130,19 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
             <span className="text-xs text-zinc-400">{docsAprobados}/{docs.length}</span>
           </div>
           {docsCargados > 0 && (
-            <p className="text-zinc-600 text-xs mt-1">{docsCargados} cargado(s) — pendiente de revisión</p>
+            <p className="text-zinc-600 text-xs mt-1">{docsCargados} pendiente(s) de revisión</p>
+          )}
+        </div>
+        <div className="bg-white/[0.03] border border-white/[0.08] rounded-xl p-4">
+          <p className="text-zinc-500 text-xs mb-1">Equipos</p>
+          <p className="text-sm text-white">{equiposData.length} registrado{equiposData.length !== 1 ? 's' : ''}</p>
+          {equiposConDocs > 0 && (
+            <p className="text-zinc-600 text-xs mt-1">{equiposConDocs} con docs pendientes</p>
           )}
         </div>
       </div>
 
-      {/* Alerta */}
+      {/* Alerta docs obligatorios */}
       {obligatoriosSinCargar > 0 && proveedor.estado !== 'APROBADO' && (
         <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-xl px-4 py-3 mb-4 flex items-center gap-2">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#eab308" strokeWidth="2">
@@ -128,13 +155,11 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
         </div>
       )}
 
-      {/* Documentos */}
-      <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
+      {/* ── DOCUMENTOS DEL LEGAJO ── */}
+      <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden mb-6">
         <div className="px-6 py-4 border-b border-white/[0.06]">
-          <h2 className="text-sm font-medium">Documentos requeridos</h2>
-          <p className="text-zinc-500 text-xs mt-0.5">
-            Trazabilidad completa — fecha de presentación, revisión e historial de cambios
-          </p>
+          <h2 className="text-sm font-medium">Documentos del legajo</h2>
+          <p className="text-zinc-500 text-xs mt-0.5">Documentación de la empresa contratista</p>
         </div>
         <div className="divide-y divide-white/[0.04]">
           {docs.map((doc: any) => {
@@ -144,7 +169,6 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
 
             return (
               <div key={doc.id} className="px-6 py-4">
-                {/* Fila principal */}
                 <div className="flex items-start justify-between gap-4 mb-2">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-0.5">
@@ -201,12 +225,10 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
                   )}
                 </div>
 
-                {/* Observaciones */}
                 {doc.observaciones && (
                   <p className="text-orange-400 text-xs italic mb-2">"{doc.observaciones}"</p>
                 )}
 
-                {/* Historial */}
                 {historial.length > 0 && (
                   <div className="mt-2 pl-3 border-l border-white/[0.06] space-y-1.5">
                     {historial.map((h: any) => (
@@ -229,7 +251,6 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
                   </div>
                 )}
 
-                {/* Acciones */}
                 <AccionesDocumento
                   docId={doc.id}
                   estado={doc.estado}
@@ -240,6 +261,146 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
             )
           })}
         </div>
+      </div>
+
+      {/* ── EQUIPOS / BIENES ── */}
+      <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-white/[0.06] flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-medium">Equipos y bienes de uso</h2>
+            <p className="text-zinc-500 text-xs mt-0.5">
+              {equiposData.length === 0
+                ? 'Sin equipos registrados'
+                : `${equiposData.length} equipo${equiposData.length !== 1 ? 's' : ''} · ${equiposAprobados} aprobado${equiposAprobados !== 1 ? 's' : ''}`
+              }
+            </p>
+          </div>
+        </div>
+
+        {equiposData.length === 0 ? (
+          <div className="px-6 py-8 text-center">
+            <p className="text-zinc-600 text-sm">El proveedor no ha registrado equipos todavía</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-white/[0.04]">
+            {equiposData.map((equipo: any) => {
+              const tipo = equipo.tipos_equipo
+              const docsEquipo = equipo.documentos_equipo ?? []
+              const docsAprobadosEq = docsEquipo.filter((d: any) => d.estado === 'APROBADO').length
+              const docsCargadosEq  = docsEquipo.filter((d: any) => d.estado === 'CARGADO').length
+              const progresoEq = docsEquipo.length > 0 ? Math.round((docsAprobadosEq / docsEquipo.length) * 100) : 0
+
+              const estadoEquipoColor: Record<string, string> = {
+                PENDIENTE:   'text-yellow-400 border-yellow-500/20 bg-yellow-500/10',
+                EN_REVISION: 'text-blue-400 border-blue-500/20 bg-blue-500/10',
+                APROBADO:    'text-green-400 border-green-500/20 bg-green-500/10',
+                RECHAZADO:   'text-red-400 border-red-500/20 bg-red-500/10',
+                INACTIVO:    'text-zinc-500 border-zinc-500/20 bg-zinc-500/10',
+              }
+
+              return (
+                <details key={equipo.id} className="group">
+                  {/* Header del equipo */}
+                  <summary className="px-6 py-4 flex items-center gap-4 cursor-pointer list-none hover:bg-white/[0.01] transition-colors">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                      className="text-zinc-600 group-open:rotate-90 transition-transform shrink-0">
+                      <polyline points="9 18 15 12 9 6"/>
+                    </svg>
+
+                    <span className="text-xl shrink-0">{tipo?.icono}</span>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-white font-medium font-mono">{equipo.dominio}</span>
+                        <span className="text-zinc-500 text-xs">{tipo?.nombre}</span>
+                        {equipo.marca && <span className="text-zinc-600 text-xs">{equipo.marca} {equipo.modelo}</span>}
+                        {equipo.anio && <span className="text-zinc-700 text-xs">{equipo.anio}</span>}
+                        {docsCargadosEq > 0 && (
+                          <span className="text-blue-400 text-xs bg-blue-500/10 border border-blue-500/20 px-1.5 py-0.5 rounded-full">
+                            {docsCargadosEq} para revisar
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <div className="w-24 h-1 bg-white/[0.08] rounded-full overflow-hidden">
+                          <div className="h-full bg-blue-500 rounded-full" style={{ width: `${progresoEq}%` }}/>
+                        </div>
+                        <span className="text-zinc-600 text-xs">{docsAprobadosEq}/{docsEquipo.length} docs</span>
+                      </div>
+                    </div>
+
+                    <span className={`text-xs px-2.5 py-1 rounded-full border shrink-0 ${estadoEquipoColor[equipo.estado] ?? estadoEquipoColor.PENDIENTE}`}>
+                      {equipo.estado.toLowerCase()}
+                    </span>
+                  </summary>
+
+                  {/* Documentos del equipo */}
+                  <div className="border-t border-white/[0.04]">
+                    {docsEquipo.length === 0 ? (
+                      <div className="px-6 py-4 text-center">
+                        <p className="text-zinc-600 text-sm">Sin documentos requeridos para este tipo de equipo</p>
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-white/[0.03]">
+                        {docsEquipo.map((doc: any) => {
+                          const dr = doc.documentos_requeridos_equipo
+                          const colorClass = estadoDocColor[doc.estado] ?? estadoDocColor.PENDIENTE
+
+                          return (
+                            <div key={doc.id} className="px-6 py-4 pl-14">
+                              <div className="flex items-start justify-between gap-4 mb-2">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-0.5">
+                                    <span className="text-sm text-white">{dr?.nombre}</span>
+                                    {dr?.obligatorio && <span className="text-red-400 text-xs">*</span>}
+                                  </div>
+                                  <div className="flex items-center gap-3 flex-wrap">
+                                    <span className="text-zinc-600 text-xs">{dr?.tipo_vigencia}</span>
+                                    {doc.fecha_venc && (
+                                      <span className="text-zinc-500 text-xs">
+                                        Vence: {new Date(doc.fecha_venc).toLocaleDateString('es-AR')}
+                                      </span>
+                                    )}
+                                    {doc.updated_at && doc.estado === 'CARGADO' && (
+                                      <span className="text-zinc-600 text-xs">
+                                        Presentado: {new Date(doc.updated_at).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {doc.observaciones && (
+                                    <p className="text-orange-400 text-xs italic mt-1">"{doc.observaciones}"</p>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-3 shrink-0">
+                                  {doc.archivo_url && (
+                                    <a href={doc.archivo_url} target="_blank" rel="noopener noreferrer"
+                                      className="text-blue-400 hover:text-blue-300 text-xs transition-colors">
+                                      Ver archivo →
+                                    </a>
+                                  )}
+                                  <span className={`text-xs px-2.5 py-1 rounded-full border ${colorClass}`}>
+                                    {doc.estado.toLowerCase()}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <AccionesDocumentoEquipo
+                                docId={doc.id}
+                                estado={doc.estado}
+                                fechaVencActual={doc.fecha_venc}
+                                tipoVigencia={dr?.tipo_vigencia ?? 'ANUAL'}
+                              />
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </details>
+              )
+            })}
+          </div>
+        )}
       </div>
     </div>
   )
