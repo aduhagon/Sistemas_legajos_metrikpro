@@ -244,7 +244,7 @@ export default function PortalClient({
     { key: 'docs',      label: 'Documentos' },
     { key: 'equipos',   label: 'Equipos' },
     { key: 'historial', label: 'Historial' },
-    { key: 'operarios', label: 'Equipo' },
+    { key: 'operarios', label: 'Personal' },
     { key: 'accesos',   label: 'Accesos' },
     { key: 'perfil',    label: 'Perfil' },
   ]
@@ -529,7 +529,7 @@ export default function PortalClient({
                 <div className="px-5 py-4 border-b border-white/[0.06]">
                   <div className="flex items-center justify-between mb-2">
                     <div>
-                      <h3 className="text-sm font-medium">Equipo con acceso al QR</h3>
+                      <h3 className="text-sm font-medium">Personal con acceso al QR</h3>
                       <p className="text-zinc-500 text-xs mt-0.5">Cada operario recibe un email para definir su contraseña</p>
                     </div>
                     <div className="flex gap-2">

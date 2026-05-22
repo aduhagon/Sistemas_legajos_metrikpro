@@ -365,23 +365,78 @@ export default function EquiposProveedor({
                           </div>
                         </div>
 
-                        {doc.estado !== 'APROBADO' && (
-                          <div className="flex items-center gap-2 mt-2 flex-wrap">
-                            {necesitaFecha && (
-                              <input type="date" value={fechas[doc.id] || doc.fecha_venc || ''}
-                                onChange={e => setFechas(f => ({ ...f, [doc.id]: e.target.value }))}
-                                min={new Date().toISOString().split('T')[0]}
-                                className="bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-1 text-white text-xs"/>
-                            )}
-                            <label className={`cursor-pointer ${estaSubiendo ? 'opacity-50 pointer-events-none' : ''}`}>
-                              <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden"
-                                onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(equipo.id, doc.id, f) }}/>
-                              <span className="bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.1] text-zinc-300 text-xs px-3 py-1.5 rounded-lg inline-block">
-                                {estaSubiendo ? 'Subiendo...' : doc.estado === 'RECHAZADO' ? 'Resubir' : 'Subir archivo'}
-                              </span>
-                            </label>
-                          </div>
-                        )}
+                        {/* Archivo adjunto — visible siempre, editable si no está aprobado */}
+                        <div className="mt-3 space-y-2">
+                          {doc.archivo_url && (
+                            <div className="flex items-center gap-2 bg-white/[0.02] border border-white/[0.06] rounded-lg px-3 py-2">
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                <polyline points="14 2 14 8 20 8"/>
+                              </svg>
+                              <a href={doc.archivo_url} target="_blank" rel="noopener noreferrer"
+                                className="text-blue-400 hover:text-blue-300 text-xs transition-colors flex-1 truncate">
+                                Ver documento adjunto →
+                              </a>
+                            </div>
+                          )}
+                          {doc.estado !== 'APROBADO' && (
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {necesitaFecha && (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-zinc-600 text-xs shrink-0">Vence:</span>
+                                  <input type="date" value={fechas[doc.id] || doc.fecha_venc || ''}
+                                    onChange={e => setFechas(f => ({ ...f, [doc.id]: e.target.value }))}
+                                    min={new Date().toISOString().split('T')[0]}
+                                    className="bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-1 text-white text-xs"/>
+                                </div>
+                              )}
+                              <label className={`cursor-pointer ${estaSubiendo ? 'opacity-50 pointer-events-none' : ''}`}>
+                                <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden"
+                                  onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(equipo.id, doc.id, f) }}/>
+                                <span className={`text-xs px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 border transition-all ${
+                                  estaSubiendo
+                                    ? 'bg-white/[0.03] border-white/[0.08] text-zinc-500'
+                                    : doc.archivo_url
+                                      ? 'bg-white/[0.05] hover:bg-white/[0.08] border-white/[0.1] text-zinc-400'
+                                      : 'bg-blue-600/20 hover:bg-blue-600/30 border-blue-500/30 text-blue-300'
+                                }`}>
+                                  {estaSubiendo ? (
+                                    <>
+                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
+                                        <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                                      </svg>
+                                      Subiendo...
+                                    </>
+                                  ) : doc.archivo_url ? (
+                                    <>
+                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                        <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                                      </svg>
+                                      Reemplazar archivo
+                                    </>
+                                  ) : (
+                                    <>
+                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                        <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                                      </svg>
+                                      Adjuntar archivo
+                                    </>
+                                  )}
+                                </span>
+                              </label>
+                              {uploadOk === doc.id && (
+                                <span className="text-green-400 text-xs flex items-center gap-1">
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                    <polyline points="20,6 9,17 4,12"/>
+                                  </svg>
+                                  Guardado
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )
                   })}
