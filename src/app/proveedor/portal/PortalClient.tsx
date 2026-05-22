@@ -6,7 +6,7 @@ import { QRCodeSVG } from 'qrcode.react'
 
 // 'historial' = historial de documentos (aprobaciones, rechazos, cargas)
 // 'accesos'   = registros de ingreso/egreso GPS
-type Vista = 'qr' | 'docs' | 'operarios' | 'historial' | 'accesos' | 'perfil'
+type Vista = 'qr' | 'docs' | 'equipos' | 'operarios' | 'historial' | 'accesos' | 'perfil'
 
 type Props = {
   proveedor: any
@@ -16,6 +16,7 @@ type Props = {
   accesos: any[]
   historialPorDoc: Record<string, any[]>
   miRol: 'titular' | 'operario'
+  equiposSlot?: React.ReactNode
 }
 
 export default function PortalClient({
@@ -26,6 +27,7 @@ export default function PortalClient({
   accesos,
   historialPorDoc,
   miRol,
+  equiposSlot,
 }: Props) {
   const [proveedor] = useState(provInit)
   const [docs, setDocs] = useState(docsInit)
@@ -239,7 +241,8 @@ export default function PortalClient({
 
   // Tabs que se muestran (sin QR — ese es el botón "← Mi QR")
   const tabs = [
-    { key: 'docs',      label: `Documentos` },
+    { key: 'docs',      label: 'Documentos' },
+    { key: 'equipos',   label: 'Equipos' },
     { key: 'historial', label: 'Historial' },
     { key: 'operarios', label: 'Equipo' },
     { key: 'accesos',   label: 'Accesos' },
@@ -503,6 +506,18 @@ export default function PortalClient({
                         </div>
                       )
                     })}
+                  </div>
+                )}
+              </div>
+            )}
+
+
+            {/* ── EQUIPOS ── */}
+            {vista === 'equipos' && (
+              <div>
+                {equiposSlot ?? (
+                  <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-8 text-center">
+                    <p className="text-zinc-500 text-sm">Sin equipos disponibles</p>
                   </div>
                 )}
               </div>

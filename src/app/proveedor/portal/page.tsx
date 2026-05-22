@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
 import PortalClient from './PortalClient'
+import EquiposProveedor from '@/components/EquiposProveedor'
 
 export default async function ProveedorPortalPage() {
   const supabase = createClient()
@@ -18,6 +19,8 @@ export default async function ProveedorPortalPage() {
     { data: docs },
     { data: habilitacion },
     { data: operarios },
+    { data: equipos },
+    { data: tiposEquipo },
   ] = await Promise.all([
     supabase
       .from('proveedores')
@@ -38,11 +41,28 @@ export default async function ProveedorPortalPage() {
       .from('proveedores_usuarios')
       .select('id, rol, nombre, cuil, activo, user_id')
       .eq('proveedor_id', provVerif.proveedor_id) : Promise.resolve({ data: [] }),
+    supabase
+      .from('equipos_contratista')
+      .select(`
+        id, dominio, marca, modelo, anio, estado,
+        tipos_equipo(nombre, icono),
+        documentos_equipo(
+          id, estado, fecha_venc, archivo_url, observaciones,
+          documentos_requeridos_equipo(nombre, tipo_vigencia, obligatorio)
+        )
+      `)
+      .eq('proveedor_id', provVerif.proveedor_id)
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('tipos_equipo')
+      .select('id, nombre, icono')
+      .eq('activo', true)
+      .order('nombre'),
   ])
 
   if (!proveedor) redirect('/proveedor/login')
 
-  // Historial de documentos — agrupado por documento_id
+  // Historial de documentos
   const docIds = (docs ?? []).map((d: any) => d.id)
   const { data: historialRaw } = docIds.length > 0
     ? await supabase
@@ -52,7 +72,6 @@ export default async function ProveedorPortalPage() {
         .order('created_at', { ascending: true })
     : { data: [] }
 
-  // Agrupar historial por documento_id
   const historialPorDoc: Record<string, any[]> = {}
   for (const h of historialRaw ?? []) {
     if (!historialPorDoc[h.documento_id]) historialPorDoc[h.documento_id] = []
@@ -80,6 +99,13 @@ export default async function ProveedorPortalPage() {
       accesos={accesos}
       historialPorDoc={historialPorDoc}
       miRol={provVerif.rol}
+      equiposSlot={
+        <EquiposProveedor
+          proveedorId={provVerif.proveedor_id}
+          equiposIniciales={(equipos ?? []) as any[]}
+          tiposEquipo={(tiposEquipo ?? []) as any[]}
+        />
+      }
     />
   )
 }
