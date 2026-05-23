@@ -83,6 +83,41 @@ export default async function ReportesPage() {
     .eq('activo', true)
     .order('nombre')
 
+  // ── EQUIPOS ──────────────────────────────────────────────────
+  const { data: todosEquipos } = await supabase
+    .from('equipos_contratista')
+    .select(`
+      id, dominio, marca, modelo, anio, estado, created_at,
+      tipos_equipo(nombre, icono),
+      proveedores(id, razon_social, cuit),
+      documentos_equipo(id, estado, fecha_venc)
+    `)
+    .order('created_at', { ascending: false })
+
+  const { data: docsEquipoVencidos } = await supabase
+    .from('documentos_equipo')
+    .select(`
+      id, fecha_venc, estado,
+      documentos_requeridos_equipo(nombre),
+      equipos_contratista(dominio, tipos_equipo(nombre, icono), proveedores(id, razon_social, cuit))
+    `)
+    .lt('fecha_venc', hoyStr)
+    .eq('estado', 'VENCIDO')
+    .order('fecha_venc', { ascending: false })
+    .limit(50)
+
+  const { data: docsEquipoPorVencer } = await supabase
+    .from('documentos_equipo')
+    .select(`
+      id, fecha_venc, estado,
+      documentos_requeridos_equipo(nombre),
+      equipos_contratista(dominio, tipos_equipo(nombre, icono), proveedores(id, razon_social, cuit))
+    `)
+    .gte('fecha_venc', hoyStr)
+    .lte('fecha_venc', en30diasStr)
+    .in('estado', ['CARGADO', 'APROBADO'])
+    .order('fecha_venc')
+
   return (
     <div>
       <div className="mb-6">
@@ -98,6 +133,9 @@ export default async function ReportesPage() {
         todosProveedores={todosProveedores ?? []}
         accesos={accesos ?? []}
         establecimientos={establecimientos ?? []}
+        todosEquipos={(todosEquipos ?? []) as any[]}
+        docsEquipoVencidos={(docsEquipoVencidos ?? []) as any[]}
+        docsEquipoPorVencer={(docsEquipoPorVencer ?? []) as any[]}
       />
     </div>
   )
