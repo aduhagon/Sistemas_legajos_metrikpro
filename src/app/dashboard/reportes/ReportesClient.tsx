@@ -37,8 +37,14 @@ export default function ReportesClient({
   const hoy = new Date()
   const hoyStr = hoy.toISOString().split('T')[0]
 
-  function diasHasta(fecha: string) {
-    return Math.ceil((new Date(fecha).getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24))
+  // FIX UX-H-02: comparar strings de fecha (YYYY-MM-DD) en lugar de timestamps
+  // para evitar que la zona horaria UTC vs local convierta "hoy" en negativo o 0
+  function diasHasta(fechaStr: string): number {
+    // Comparación puramente de strings de fecha — sin conversión de zona horaria
+    const [ay, am, ad] = hoyStr.split('-').map(Number)
+    const [by, bm, bd] = fechaStr.split('-').map(Number)
+    const msLocal = Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)
+    return Math.ceil(msLocal / (1000 * 60 * 60 * 24))
   }
 
   const rubroConteo = porRubro.reduce((acc: Record<string, number>, p: any) => {
@@ -73,7 +79,11 @@ export default function ReportesClient({
     ? todosEquipos
     : todosEquipos.filter(e => e.estado === filtroEstadoEquipo)
 
-  const vencimientosFiltrados = vencimientos.filter((d: any) => diasHasta(d.fecha_venc) <= filtroDias)
+  // FIX UX-H-02: filtrar por días usando la función corregida
+  const vencimientosFiltrados = vencimientos.filter((d: any) => {
+    const dias = diasHasta(d.fecha_venc)
+    return dias >= 0 && dias <= filtroDias
+  })
 
   const estadoColor: Record<string, string> = {
     PENDIENTE:   'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
@@ -134,15 +144,15 @@ export default function ReportesClient({
     const todos = [...vencimientos, ...vencidos]
     exportarCSV(
       todos.map((d: any) => {
-        const dias = d.fecha_venc ? diasHasta(d.fecha_venc) : '—'
+        const dias = d.fecha_venc ? diasHasta(d.fecha_venc) : null
         return [
           d.proveedores?.razon_social ?? '',
           d.proveedores?.cuit ?? '',
           d.proveedores?.rubros?.nombre ?? '',
           d.documentos_requeridos?.nombre ?? '',
-          d.fecha_venc ? new Date(d.fecha_venc).toLocaleDateString('es-AR') : '',
+          d.fecha_venc ? new Date(d.fecha_venc + 'T12:00:00').toLocaleDateString('es-AR') : '',
           d.estado,
-          typeof dias === 'number' ? (dias < 0 ? `Vencido hace ${Math.abs(dias)} días` : `En ${dias} días`) : '—',
+          dias !== null ? (dias < 0 ? `Vencido hace ${Math.abs(dias)} días` : `En ${dias} días`) : '—',
         ]
       }),
       `vencimientos_${hoyStr}.csv`,
@@ -168,6 +178,12 @@ export default function ReportesClient({
       `accesos_${hoyStr}.csv`,
       ['Fecha', 'Hora', 'Tipo', 'Proveedor', 'CUIT', 'Rubro', 'GPS', 'En perímetro']
     )
+  }
+
+  // FIX UX-H-02: formatear fecha de vencimiento sin corrimiento de zona horaria
+  // Usar T12:00:00 para que toLocaleDateString no devuelva el día anterior
+  function formatFechaVenc(fechaStr: string): string {
+    return new Date(fechaStr + 'T12:00:00').toLocaleDateString('es-AR')
   }
 
   const proveedoresFiltrados = filtroEstado === 'TODOS'
@@ -424,20 +440,23 @@ export default function ReportesClient({
                 <span className="text-red-400 text-sm font-medium">🔴 Vencidos — legajos ({vencidos.length})</span>
               </div>
               <div className="divide-y divide-white/[0.04]">
-                {vencidos.map((d: any) => (
-                  <div key={d.id} className="px-5 py-3 flex items-center justify-between">
-                    <div>
-                      <Link href={`/dashboard/legajos/${d.proveedores?.id}`} className="text-white text-sm hover:text-blue-300 transition-colors font-medium">
-                        {d.proveedores?.razon_social}
-                      </Link>
-                      <p className="text-zinc-500 text-xs">{d.documentos_requeridos?.nombre}</p>
+                {vencidos.map((d: any) => {
+                  const dias = Math.abs(diasHasta(d.fecha_venc))
+                  return (
+                    <div key={d.id} className="px-5 py-3 flex items-center justify-between">
+                      <div>
+                        <Link href={`/dashboard/legajos/${d.proveedores?.id}`} className="text-white text-sm hover:text-blue-300 transition-colors font-medium">
+                          {d.proveedores?.razon_social}
+                        </Link>
+                        <p className="text-zinc-500 text-xs">{d.documentos_requeridos?.nombre}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-red-400 text-xs font-medium">Venció el {formatFechaVenc(d.fecha_venc)}</p>
+                        <p className="text-red-600 text-xs">hace {dias} día{dias !== 1 ? 's' : ''}</p>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-red-400 text-xs font-medium">Venció el {new Date(d.fecha_venc).toLocaleDateString('es-AR')}</p>
-                      <p className="text-red-600 text-xs">hace {Math.abs(diasHasta(d.fecha_venc))} días</p>
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
@@ -459,9 +478,9 @@ export default function ReportesClient({
                         <p className="text-zinc-500 text-xs">{d.documentos_requeridos?.nombre}</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-zinc-300 text-xs">{new Date(d.fecha_venc).toLocaleDateString('es-AR')}</p>
-                        <p className={`text-xs font-medium ${dias <= 7 ? 'text-red-400' : dias <= 15 ? 'text-orange-400' : 'text-yellow-400'}`}>
-                          en {dias} día{dias !== 1 ? 's' : ''}
+                        <p className="text-zinc-300 text-xs">{formatFechaVenc(d.fecha_venc)}</p>
+                        <p className={`text-xs font-medium ${dias === 0 ? 'text-red-400' : dias <= 7 ? 'text-red-400' : dias <= 15 ? 'text-orange-400' : 'text-yellow-400'}`}>
+                          {dias === 0 ? 'Vence hoy' : `en ${dias} día${dias !== 1 ? 's' : ''}`}
                         </p>
                       </div>
                     </div>
@@ -480,6 +499,7 @@ export default function ReportesClient({
               <div className="divide-y divide-white/[0.04]">
                 {docsEquipoVencidos.map((d: any) => {
                   const equipo = d.equipos_contratista
+                  const dias = Math.abs(diasHasta(d.fecha_venc))
                   return (
                     <div key={d.id} className="px-5 py-3 flex items-center justify-between">
                       <div>
@@ -491,8 +511,8 @@ export default function ReportesClient({
                         <p className="text-zinc-500 text-xs mt-0.5">{d.documentos_requeridos_equipo?.nombre}</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-red-400 text-xs font-medium">Venció el {new Date(d.fecha_venc).toLocaleDateString('es-AR')}</p>
-                        <p className="text-red-600 text-xs">hace {Math.abs(diasHasta(d.fecha_venc))} días</p>
+                        <p className="text-red-400 text-xs font-medium">Venció el {formatFechaVenc(d.fecha_venc)}</p>
+                        <p className="text-red-600 text-xs">hace {dias} día{dias !== 1 ? 's' : ''}</p>
                       </div>
                     </div>
                   )
@@ -521,9 +541,9 @@ export default function ReportesClient({
                         <p className="text-zinc-500 text-xs mt-0.5">{d.documentos_requeridos_equipo?.nombre}</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-zinc-300 text-xs">{new Date(d.fecha_venc).toLocaleDateString('es-AR')}</p>
-                        <p className={`text-xs font-medium ${dias <= 7 ? 'text-red-400' : dias <= 15 ? 'text-orange-400' : 'text-yellow-400'}`}>
-                          en {dias} día{dias !== 1 ? 's' : ''}
+                        <p className="text-zinc-300 text-xs">{formatFechaVenc(d.fecha_venc)}</p>
+                        <p className={`text-xs font-medium ${dias === 0 ? 'text-red-400' : dias <= 7 ? 'text-red-400' : dias <= 15 ? 'text-orange-400' : 'text-yellow-400'}`}>
+                          {dias === 0 ? 'Vence hoy' : `en ${dias} día${dias !== 1 ? 's' : ''}`}
                         </p>
                       </div>
                     </div>
@@ -619,7 +639,6 @@ export default function ReportesClient({
             <button onClick={exportarEquiposCSV} className={btnExport}>{iconDownload} Exportar CSV</button>
           </div>
 
-          {/* Stats rápidas */}
           <div className="grid grid-cols-4 gap-3">
             {[
               { label: 'Total', value: todosEquipos.length, color: 'white' },
@@ -637,7 +656,6 @@ export default function ReportesClient({
             ))}
           </div>
 
-          {/* Tabla equipos */}
           <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
             <div className="px-5 py-3 border-b border-white/[0.06] flex items-center justify-between">
               <span className="text-sm font-medium">Lista de equipos</span>
