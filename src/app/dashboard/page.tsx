@@ -57,6 +57,11 @@ export default async function DashboardPage() {
     .select('*', { count: 'exact', head: true })
     .eq('estado', 'VENCIDO')
 
+  // FIX UX-H-01: usar variable booleana explícita para evitar que
+  // equiposVencidos === 0 se renderice como texto "0" en el JSX
+  const hayEquiposVencidos = (equiposVencidos ?? 0) > 0
+  const hayEquiposPorVencer = (equiposPorVencer?.length ?? 0) > 0
+
   return (
     <div>
 
@@ -90,14 +95,14 @@ export default async function DashboardPage() {
       )}
 
       {/* Alerta vencimientos — equipos */}
-      {((equiposPorVencer && equiposPorVencer.length > 0) || (equiposVencidos && equiposVencidos > 0)) && (
+      {(hayEquiposPorVencer || hayEquiposVencidos) && (
         <div className={`border rounded-2xl p-4 mb-4 flex items-start gap-3 ${
-          equiposVencidos && equiposVencidos > 0
+          hayEquiposVencidos
             ? 'bg-red-500/5 border-red-500/20'
             : 'bg-orange-500/5 border-orange-500/20'
         }`}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-            stroke={equiposVencidos && equiposVencidos > 0 ? '#ef4444' : '#f97316'}
+            stroke={hayEquiposVencidos ? '#ef4444' : '#f97316'}
             strokeWidth="2" className="shrink-0 mt-0.5">
             <rect x="1" y="3" width="15" height="13" rx="1"/>
             <path d="M16 8h4l3 3v4h-7z"/>
@@ -105,19 +110,19 @@ export default async function DashboardPage() {
             <circle cx="18.5" cy="18.5" r="2.5"/>
           </svg>
           <div className="flex-1">
-            {equiposVencidos && equiposVencidos > 0 && (
+            {hayEquiposVencidos && (
               <p className="text-red-400 text-sm font-medium mb-1">
-                🔴 {equiposVencidos} documento{equiposVencidos > 1 ? 's' : ''} de equipos vencido{equiposVencidos > 1 ? 's' : ''}
+                🔴 {equiposVencidos} documento{(equiposVencidos ?? 0) > 1 ? 's' : ''} de equipos vencido{(equiposVencidos ?? 0) > 1 ? 's' : ''}
                 {' '}<Link href="/dashboard/reportes" className="text-red-300 hover:text-red-200 underline transition-colors">Ver en reportes →</Link>
               </p>
             )}
-            {equiposPorVencer && equiposPorVencer.length > 0 && (
+            {hayEquiposPorVencer && (
               <>
-                <p className={`text-sm font-medium mb-1 ${equiposVencidos && equiposVencidos > 0 ? 'text-orange-400' : 'text-orange-300'}`}>
-                  {equiposPorVencer.length} documento{equiposPorVencer.length > 1 ? 's' : ''} de equipos por vencer en 7 días
+                <p className={`text-sm font-medium mb-1 ${hayEquiposVencidos ? 'text-orange-400' : 'text-orange-300'}`}>
+                  {equiposPorVencer!.length} documento{equiposPorVencer!.length > 1 ? 's' : ''} de equipos por vencer en 7 días
                 </p>
                 <div className="space-y-0.5">
-                  {equiposPorVencer.map((doc: any) => {
+                  {equiposPorVencer!.map((doc: any) => {
                     const equipo = doc.equipos_contratista
                     return (
                       <p key={doc.id} className="text-zinc-500 text-xs">
@@ -204,7 +209,7 @@ export default async function DashboardPage() {
           </div>
           <p className="font-medium text-sm group-hover:text-purple-300 transition-colors mb-1">Reportes</p>
           <p className="text-zinc-500 text-xs">Métricas y exportación</p>
-          {(equiposVencidos ?? 0) > 0 && (
+          {hayEquiposVencidos && (
             <span className="mt-2 inline-block bg-red-500/10 text-red-400 border border-red-500/20 text-xs px-2 py-0.5 rounded-full">
               {equiposVencidos} equipo{(equiposVencidos ?? 0) > 1 ? 's' : ''} vencido{(equiposVencidos ?? 0) > 1 ? 's' : ''}
             </span>
