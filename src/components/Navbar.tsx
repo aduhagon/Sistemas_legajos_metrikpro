@@ -35,6 +35,7 @@ export default function Navbar({ nombre, rol }: Props) {
   const links = [
     { href: '/dashboard',           label: 'Inicio',   roles: ['admin', 'evaluador', 'operador_acceso'] },
     { href: '/dashboard/legajos',   label: 'Legajos',  roles: ['admin', 'evaluador', 'operario'] },
+    { href: '/auditor',              label: 'Auditoría', roles: ['admin', 'evaluador', 'auditor'] },
     { href: '/dashboard/reportes',  label: 'Reportes', roles: ['admin', 'evaluador'] },
   ]
 
