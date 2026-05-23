@@ -3,7 +3,42 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '@/lib/supabase-client'
 
-// ── Lector QR con cámara ─────────────────────────────────────
+// ── Tipos ────────────────────────────────────────────────────
+type Establecimiento = { id: string; nombre: string; lat_centro: number; lng_centro: number; radio_metros: number }
+type ProveedorSnap   = { id: string; razon_social: string; cuit: string; estado: string; qr_token: string; habilitacion_estado: string; habilitacion_venc: string; docs_vencidos: number; equipos: any[] }
+type ChecklistItem   = { id: string; nombre: string; descripcion: string }
+type Snapshot        = { generado_at: string; establecimiento: any; proveedores: ProveedorSnap[]; checklist: ChecklistItem[] }
+type VisitaLocal = {
+  id: string; establecimiento_id: string; proveedor_id?: string; equipo_id?: string
+  qr_token?: string; resultado: 'CONFORME'|'NO_CONFORME'|'URGENTE'|'OBSERVACION'
+  observacion: string; foto_url?: string; lat?: number; lng?: number
+  offline: boolean; visitado_at: string
+  checklist: { checklist_id: string; cumple: boolean; observacion: string }[]
+  sincronizado: boolean
+}
+
+const RESULTADO_COLOR: Record<string, string> = {
+  CONFORME:    'bg-green-500/10 text-green-400 border-green-500/20',
+  NO_CONFORME: 'bg-red-500/10 text-red-400 border-red-500/20',
+  URGENTE:     'bg-red-600/15 text-red-300 border-red-600/30',
+  OBSERVACION: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
+}
+const RESULTADO_LABEL: Record<string, string> = {
+  CONFORME:    '✓ Conforme',
+  NO_CONFORME: '✗ No conforme',
+  URGENTE:     '⚠ Urgente',
+  OBSERVACION: '○ Observación',
+}
+
+const DB_KEY = 'auditor_visitas_queue'
+const SNAP_KEY = (id: string) => `auditor_snap_${id}`
+
+function getQueue(): VisitaLocal[] { try { return JSON.parse(localStorage.getItem(DB_KEY) || '[]') } catch { return [] } }
+function saveQueue(q: VisitaLocal[]) { localStorage.setItem(DB_KEY, JSON.stringify(q)) }
+function getSnap(id: string): Snapshot | null { try { return JSON.parse(localStorage.getItem(SNAP_KEY(id)) || 'null') } catch { return null } }
+function saveSnap(id: string, snap: Snapshot) { localStorage.setItem(SNAP_KEY(id), JSON.stringify(snap)) }
+
+// ── Componente QR Scanner ────────────────────────────────────
 function QRScanner({ onScan, onClose }: { onScan: (token: string) => void; onClose: () => void }) {
   const videoRef  = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -12,10 +47,7 @@ function QRScanner({ onScan, onClose }: { onScan: (token: string) => void; onClo
   const [error, setError]   = useState('')
   const [activo, setActivo] = useState(false)
 
-  useEffect(() => {
-    iniciarCamara()
-    return () => detener()
-  }, [])
+  useEffect(() => { iniciarCamara(); return () => detener() }, [])
 
   async function iniciarCamara() {
     try {
@@ -29,7 +61,7 @@ function QRScanner({ onScan, onClose }: { onScan: (token: string) => void; onClo
         setActivo(true)
         escanear()
       }
-    } catch (e: any) {
+    } catch {
       setError('No se pudo acceder a la cámara. Verificá los permisos del navegador.')
     }
   }
@@ -51,198 +83,119 @@ function QRScanner({ onScan, onClose }: { onScan: (token: string) => void; onClo
     const ctx = canvas.getContext('2d')!
     ctx.drawImage(video, 0, 0)
 
-    // Intentar BarcodeDetector (Chrome/Android nativo)
     if ('BarcodeDetector' in window) {
       try {
         // @ts-ignore
         const detector = new BarcodeDetector({ formats: ['qr_code'] })
         const codes = await detector.detect(canvas)
-        if (codes.length > 0) {
-          detener()
-          onScan(codes[0].rawValue)
-          return
-        }
+        if (codes.length > 0) { detener(); onScan(codes[0].rawValue); return }
       } catch {}
     } else {
-      // Fallback: jsQR (se carga dinámicamente)
       try {
         const jsQR = (window as any).jsQR
         if (jsQR) {
-          const img = ctx.getImageData(0, 0, canvas.width, canvas.height)
+          const img  = ctx.getImageData(0, 0, canvas.width, canvas.height)
           const code = jsQR(img.data, img.width, img.height)
-          if (code) {
-            detener()
-            onScan(code.data)
-            return
-          }
+          if (code) { detener(); onScan(code.data); return }
         }
       } catch {}
     }
-
     rafRef.current = requestAnimationFrame(escanear)
   }
 
   return (
-    <div className="fixed inset-0 bg-black z-50 flex flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 bg-black/80">
-        <p className="text-white text-sm font-medium">Escanear QR del proveedor</p>
+    <div style={{ position: 'fixed', inset: 0, background: '#000', zIndex: 9999, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', background: 'rgba(0,0,0,0.8)' }}>
+        <p style={{ color: '#fff', fontSize: 14, fontWeight: 500, margin: 0 }}>Escanear QR del proveedor</p>
         <button onClick={() => { detener(); onClose() }}
-          className="text-zinc-400 hover:text-white transition-colors p-1">
+          style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', padding: 4 }}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M18 6 6 18M6 6l12 12"/>
           </svg>
         </button>
       </div>
 
-      {/* Cámara */}
-      <div className="flex-1 relative flex items-center justify-center bg-black">
-        <video ref={videoRef} className="w-full h-full object-cover" muted playsInline autoPlay/>
-        <canvas ref={canvasRef} className="hidden"/>
+      <div style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <video ref={videoRef} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted playsInline autoPlay/>
+        <canvas ref={canvasRef} style={{ display: 'none' }}/>
 
-        {/* Marco de escaneo */}
         {activo && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="relative w-64 h-64">
-              {/* Esquinas del marco */}
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+            <div style={{ position: 'relative', width: 256, height: 256 }}>
               {[
-                'top-0 left-0 border-t-2 border-l-2 rounded-tl-lg',
-                'top-0 right-0 border-t-2 border-r-2 rounded-tr-lg',
-                'bottom-0 left-0 border-b-2 border-l-2 rounded-bl-lg',
-                'bottom-0 right-0 border-b-2 border-r-2 rounded-br-lg',
-              ].map((cls, i) => (
-                <div key={i} className={`absolute w-8 h-8 border-blue-400 ${cls}`}/>
+                { top: 0, left: 0, borderTop: '2px solid #60a5fa', borderLeft: '2px solid #60a5fa', borderRadius: '8px 0 0 0' },
+                { top: 0, right: 0, borderTop: '2px solid #60a5fa', borderRight: '2px solid #60a5fa', borderRadius: '0 8px 0 0' },
+                { bottom: 0, left: 0, borderBottom: '2px solid #60a5fa', borderLeft: '2px solid #60a5fa', borderRadius: '0 0 0 8px' },
+                { bottom: 0, right: 0, borderBottom: '2px solid #60a5fa', borderRight: '2px solid #60a5fa', borderRadius: '0 0 8px 0' },
+              ].map((s, i) => (
+                <div key={i} style={{ position: 'absolute', width: 32, height: 32, ...s }}/>
               ))}
-              {/* Línea de escaneo animada */}
-              <div className="absolute inset-x-0 top-1/2 h-0.5 bg-blue-400/60"
-                style={{ animation: 'scan 2s ease-in-out infinite alternate' }}/>
+              <div style={{
+                position: 'absolute', left: 0, right: 0, height: 2, background: 'rgba(96,165,250,0.7)',
+                animation: 'scan 2s ease-in-out infinite alternate',
+                top: '50%',
+              }}/>
             </div>
           </div>
         )}
 
         {error && (
-          <div className="absolute inset-0 flex items-center justify-center p-6">
-            <div className="bg-red-500/20 border border-red-500/30 rounded-2xl p-6 text-center">
-              <p className="text-red-300 text-sm">{error}</p>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+            <div style={{ background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 16, padding: 24, textAlign: 'center' }}>
+              <p style={{ color: '#fca5a5', fontSize: 14, margin: '0 0 12px' }}>{error}</p>
               <button onClick={() => { setError(''); iniciarCamara() }}
-                className="mt-3 text-xs text-blue-400 underline">Reintentar</button>
+                style={{ background: 'none', border: 'none', color: '#60a5fa', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>
+                Reintentar
+              </button>
             </div>
           </div>
         )}
       </div>
 
-      <p className="text-zinc-500 text-xs text-center py-3 bg-black">
+      <p style={{ color: '#6b7280', fontSize: 12, textAlign: 'center', padding: '12px 0', background: '#000', margin: 0 }}>
         Apuntá la cámara al código QR del proveedor
       </p>
 
-      <style>{`
-        @keyframes scan {
-          from { transform: translateY(-80px); opacity: 0.4; }
-          to   { transform: translateY(80px);  opacity: 1; }
-        }
-      `}</style>
-    </div>
-
-      {/* Scanner overlay */}
-      {scannerAbierto && (
-        <QRScanner
-          onScan={(token) => { setScannerAbierto(false); buscarPorQR(token) }}
-          onClose={() => setScannerAbierto(false)}
-        />
-      )}
+      <style>{`@keyframes scan { from { transform: translateY(-80px); opacity: 0.4; } to { transform: translateY(80px); opacity: 1; } }`}</style>
     </div>
   )
 }
 
-// ── Tipos ────────────────────────────────────────────────────
-type Establecimiento = { id: string; nombre: string; lat_centro: number; lng_centro: number; radio_metros: number }
-type ProveedorSnap   = { id: string; razon_social: string; cuit: string; estado: string; qr_token: string; habilitacion_estado: string; habilitacion_venc: string; docs_vencidos: number; equipos: any[] }
-type ChecklistItem   = { id: string; nombre: string; descripcion: string }
-type Snapshot        = { generado_at: string; establecimiento: any; proveedores: ProveedorSnap[]; checklist: ChecklistItem[] }
-
-type VisitaLocal = {
-  id:                  string
-  establecimiento_id:  string
-  proveedor_id?:       string
-  equipo_id?:          string
-  qr_token?:           string
-  resultado:           'CONFORME' | 'NO_CONFORME' | 'URGENTE' | 'OBSERVACION'
-  observacion:         string
-  foto_url?:           string
-  lat?:                number
-  lng?:                number
-  offline:             boolean
-  visitado_at:         string
-  checklist:           { checklist_id: string; cumple: boolean; observacion: string }[]
-  sincronizado:        boolean
-}
-
-const RESULTADO_COLOR: Record<string, string> = {
-  CONFORME:     'bg-green-500/10 text-green-400 border-green-500/20',
-  NO_CONFORME:  'bg-red-500/10 text-red-400 border-red-500/20',
-  URGENTE:      'bg-red-600/15 text-red-300 border-red-600/30',
-  OBSERVACION:  'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-}
-const RESULTADO_LABEL: Record<string, string> = {
-  CONFORME:    '✓ Conforme',
-  NO_CONFORME: '✗ No conforme',
-  URGENTE:     '⚠ Urgente',
-  OBSERVACION: '○ Observación',
-}
-
-const DB_KEY = 'auditor_visitas_queue'
-const SNAP_KEY = (estId: string) => `auditor_snap_${estId}`
-
-function getQueue(): VisitaLocal[] {
-  try { return JSON.parse(localStorage.getItem(DB_KEY) || '[]') } catch { return [] }
-}
-function saveQueue(q: VisitaLocal[]) {
-  localStorage.setItem(DB_KEY, JSON.stringify(q))
-}
-function getSnap(estId: string): Snapshot | null {
-  try { return JSON.parse(localStorage.getItem(SNAP_KEY(estId)) || 'null') } catch { return null }
-}
-function saveSnap(estId: string, snap: Snapshot) {
-  localStorage.setItem(SNAP_KEY(estId), JSON.stringify(snap))
-}
-
+// ── Componente principal ─────────────────────────────────────
 export default function AuditorApp({ establecimientos, auditorId }: { establecimientos: Establecimiento[]; auditorId: string }) {
-  const [online, setOnline]                       = useState(true)
-  const [scannerAbierto, setScannerAbierto]       = useState(false)
-  const [vista, setVista]                         = useState<'inicio'|'escanear'|'visita'|'cola'>('inicio')
-  const [estSeleccionado, setEst]                 = useState<Establecimiento | null>(null)
-  const [snapshot, setSnapshot]                   = useState<Snapshot | null>(null)
-  const [loadingSnap, setLoadingSnap]             = useState(false)
-  const [qrInput, setQrInput]                     = useState('')
-  const [proveedorEncontrado, setProv]            = useState<ProveedorSnap | null>(null)
-  const [resultado, setResultado]                 = useState<'CONFORME'|'NO_CONFORME'|'URGENTE'|'OBSERVACION'>('CONFORME')
-  const [observacion, setObservacion]             = useState('')
-  const [checklistResp, setChecklistResp]         = useState<Record<string, { cumple: boolean; obs: string }>>({})
-  const [foto, setFoto]                           = useState<string | null>(null)
-  const [cola, setCola]                           = useState<VisitaLocal[]>([])
-  const [sincronizando, setSincronizando]         = useState(false)
-  const [guardando, setGuardando]                 = useState(false)
-  const [msg, setMsg]                             = useState('')
+  const [online, setOnline]               = useState(true)
+  const [scannerAbierto, setScannerAbierto] = useState(false)
+  const [vista, setVista]                 = useState<'inicio'|'escanear'|'visita'|'cola'>('inicio')
+  const [estSeleccionado, setEst]         = useState<Establecimiento | null>(null)
+  const [snapshot, setSnapshot]           = useState<Snapshot | null>(null)
+  const [loadingSnap, setLoadingSnap]     = useState(false)
+  const [qrInput, setQrInput]             = useState('')
+  const [proveedorEncontrado, setProv]    = useState<ProveedorSnap | null>(null)
+  const [resultado, setResultado]         = useState<'CONFORME'|'NO_CONFORME'|'URGENTE'|'OBSERVACION'>('CONFORME')
+  const [observacion, setObservacion]     = useState('')
+  const [checklistResp, setChecklistResp] = useState<Record<string, { cumple: boolean; obs: string }>>({})
+  const [foto, setFoto]                   = useState<string | null>(null)
+  const [cola, setCola]                   = useState<VisitaLocal[]>([])
+  const [sincronizando, setSincronizando] = useState(false)
+  const [guardando, setGuardando]         = useState(false)
+  const [msg, setMsg]                     = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // Online/offline listener
   useEffect(() => {
-    const on  = () => { setOnline(true);  sincronizarCola() }
+    const on  = () => { setOnline(true); sincronizarCola() }
     const off = () => setOnline(false)
-    window.addEventListener('online',  on)
+    window.addEventListener('online', on)
     window.addEventListener('offline', off)
     setOnline(navigator.onLine)
     setCola(getQueue())
-    // Cargar jsQR como fallback para navegadores sin BarcodeDetector
     if (!('BarcodeDetector' in window) && !(window as any).jsQR) {
-      const script = document.createElement('script')
-      script.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js'
-      document.head.appendChild(script)
+      const s = document.createElement('script')
+      s.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js'
+      document.head.appendChild(s)
     }
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
   }, [])
 
-  // Auto-sincronizar al volver online
   const sincronizarCola = useCallback(async () => {
     const q = getQueue().filter(v => !v.sincronizado)
     if (q.length === 0) return
@@ -252,17 +205,16 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
       try {
         const { data } = await supabase.rpc('registrar_visita_auditoria', {
           p_establecimiento_id: visita.establecimiento_id,
-          p_proveedor_id:       visita.proveedor_id ?? null,
-          p_equipo_id:          visita.equipo_id ?? null,
-          p_qr_token:           visita.qr_token ?? null,
-          p_resultado:          visita.resultado,
-          p_observacion:        visita.observacion || null,
-          p_foto_url:           visita.foto_url ?? null,
-          p_lat:                visita.lat ?? null,
-          p_lng:                visita.lng ?? null,
-          p_offline:            true,
-          p_visitado_at:        visita.visitado_at,
-          p_checklist:          JSON.stringify(visita.checklist),
+          p_proveedor_id: visita.proveedor_id ?? null,
+          p_qr_token: visita.qr_token ?? null,
+          p_resultado: visita.resultado,
+          p_observacion: visita.observacion || null,
+          p_foto_url: visita.foto_url ?? null,
+          p_lat: visita.lat ?? null,
+          p_lng: visita.lng ?? null,
+          p_offline: true,
+          p_visitado_at: visita.visitado_at,
+          p_checklist: JSON.stringify(visita.checklist),
         })
         if (data?.ok) {
           const idx = nuevaQ.findIndex(v => v.id === visita.id)
@@ -273,25 +225,21 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
     saveQueue(nuevaQ)
     setCola(nuevaQ)
     setSincronizando(false)
-    setMsg(`${nuevaQ.filter(v => v.sincronizado).length} visita(s) sincronizada(s)`)
+    const n = nuevaQ.filter(v => v.sincronizado).length
+    setMsg(`${n} visita(s) sincronizada(s)`)
     setTimeout(() => setMsg(''), 3000)
   }, [])
 
-  // Descargar snapshot
   async function descargarSnapshot(est: Establecimiento) {
     setLoadingSnap(true)
     if (online) {
       const { data } = await supabase.rpc('generar_snapshot_auditoria', {
-        p_auditor_id:        auditorId,
+        p_auditor_id: auditorId,
         p_establecimiento_id: est.id,
       })
-      if (data) {
-        saveSnap(est.id, data)
-        setSnapshot(data)
-      }
+      if (data) { saveSnap(est.id, data); setSnapshot(data) }
     } else {
-      const snap = getSnap(est.id)
-      setSnapshot(snap)
+      setSnapshot(getSnap(est.id))
     }
     setLoadingSnap(false)
   }
@@ -302,84 +250,65 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
     setVista('escanear')
   }
 
-  // Buscar proveedor por QR token
   function buscarPorQR(token: string) {
-    if (!snapshot) return
+    if (!snapshot) { setMsg('Snapshot no disponible'); setTimeout(() => setMsg(''), 3000); return }
     const prov = snapshot.proveedores?.find(p => p.qr_token === token)
-    if (prov) {
-      setProv(prov)
-      setVista('visita')
-    } else {
-      setMsg('QR no encontrado en el snapshot. ' + (online ? '' : 'Verificá con conexión.'))
-      setTimeout(() => setMsg(''), 3000)
-    }
+    if (prov) { setProv(prov); setVista('visita') }
+    else { setMsg('QR no encontrado en el snapshot.' + (online ? '' : ' Verificá con conexión.')); setTimeout(() => setMsg(''), 3000) }
   }
 
-  // Capturar GPS
   function getGPS(): Promise<{ lat: number; lng: number } | null> {
     return new Promise(resolve => {
       if (!navigator.geolocation) { resolve(null); return }
       navigator.geolocation.getCurrentPosition(
         pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-        ()  => resolve(null),
+        () => resolve(null),
         { timeout: 5000 }
       )
     })
   }
 
-  // Guardar visita
   async function guardarVisita() {
     if (!estSeleccionado || !proveedorEncontrado) return
     setGuardando(true)
-    const gps = await getGPS()
+    const gps   = await getGPS()
     const ahora = new Date().toISOString()
-
     const checklistArr = snapshot?.checklist?.map(item => ({
       checklist_id: item.id,
-      cumple:       checklistResp[item.id]?.cumple ?? true,
-      observacion:  checklistResp[item.id]?.obs ?? '',
+      cumple: checklistResp[item.id]?.cumple ?? true,
+      observacion: checklistResp[item.id]?.obs ?? '',
     })) ?? []
 
     if (online) {
       const { data } = await supabase.rpc('registrar_visita_auditoria', {
         p_establecimiento_id: estSeleccionado.id,
-        p_proveedor_id:       proveedorEncontrado.id,
-        p_qr_token:           proveedorEncontrado.qr_token,
-        p_resultado:          resultado,
-        p_observacion:        observacion || null,
-        p_foto_url:           foto ?? null,
-        p_lat:                gps?.lat ?? null,
-        p_lng:                gps?.lng ?? null,
-        p_offline:            false,
-        p_visitado_at:        ahora,
-        p_checklist:          JSON.stringify(checklistArr),
+        p_proveedor_id: proveedorEncontrado.id,
+        p_qr_token: proveedorEncontrado.qr_token,
+        p_resultado: resultado,
+        p_observacion: observacion || null,
+        p_foto_url: foto ?? null,
+        p_lat: gps?.lat ?? null,
+        p_lng: gps?.lng ?? null,
+        p_offline: false,
+        p_visitado_at: ahora,
+        p_checklist: JSON.stringify(checklistArr),
       })
-      if (data?.ok) {
-        setMsg('Visita registrada')
-        resetVisita()
-      } else {
-        setMsg('Error al guardar')
-      }
+      if (data?.ok) { setMsg('Visita registrada'); resetVisita() }
+      else setMsg('Error al guardar')
     } else {
-      // Guardar offline
       const visitaLocal: VisitaLocal = {
-        id:                 crypto.randomUUID(),
+        id: crypto.randomUUID(),
         establecimiento_id: estSeleccionado.id,
-        proveedor_id:       proveedorEncontrado.id,
-        qr_token:           proveedorEncontrado.qr_token,
-        resultado,
-        observacion,
-        foto_url:           foto ?? undefined,
-        lat:                gps?.lat,
-        lng:                gps?.lng,
-        offline:            true,
-        visitado_at:        ahora,
-        checklist:          checklistArr,
-        sincronizado:       false,
+        proveedor_id: proveedorEncontrado.id,
+        qr_token: proveedorEncontrado.qr_token,
+        resultado, observacion,
+        foto_url: foto ?? undefined,
+        lat: gps?.lat, lng: gps?.lng,
+        offline: true, visitado_at: ahora,
+        checklist: checklistArr, sincronizado: false,
       }
       const q = [...getQueue(), visitaLocal]
-      saveQueue(q)
-      setCola(q)
+      saveQueue(q); setCola(q)
       setMsg('Guardado offline — se sincronizará al recuperar señal')
       resetVisita()
     }
@@ -389,8 +318,7 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
 
   function resetVisita() {
     setProv(null); setResultado('CONFORME'); setObservacion('')
-    setChecklistResp({}); setFoto(null); setQrInput('')
-    setVista('escanear')
+    setChecklistResp({}); setFoto(null); setQrInput(''); setVista('escanear')
   }
 
   function handleFoto(e: React.ChangeEvent<HTMLInputElement>) {
@@ -405,311 +333,289 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
   const inputCls = "w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500/60 transition-all placeholder:text-zinc-600"
 
   return (
-    <div className="min-h-screen bg-[#0d0f17] text-white max-w-sm mx-auto px-4 py-6">
-
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <p className="text-xs text-zinc-500 mb-0.5">Sistema Legajos</p>
-          <h1 className="text-lg font-medium">App de auditoría</h1>
-        </div>
-        <div className="flex items-center gap-2">
-          {pendientes > 0 && (
-            <button onClick={() => setVista('cola')}
-              className="text-xs bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 px-2 py-1 rounded-full">
-              {pendientes} pendiente{pendientes > 1 ? 's' : ''}
-            </button>
-          )}
-          <div className={`w-2 h-2 rounded-full ${online ? 'bg-green-400' : 'bg-red-400'}`} title={online ? 'Online' : 'Offline'} />
-        </div>
-      </div>
-
-      {/* Mensaje flash */}
-      {msg && (
-        <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3 mb-4">
-          <p className="text-blue-300 text-sm">{sincronizando ? '⟳ Sincronizando...' : msg}</p>
-        </div>
-      )}
-
-      {/* ── VISTA: INICIO ── */}
-      {vista === 'inicio' && (
-        <div className="space-y-3">
-          <p className="text-zinc-500 text-sm mb-4">Seleccioná un establecimiento para auditar</p>
-          {establecimientos.map(est => (
-            <button key={est.id} onClick={() => seleccionarEst(est)}
-              disabled={loadingSnap}
-              className="w-full bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.08] rounded-2xl p-4 text-left transition-all">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium text-sm">{est.nombre}</p>
-                  <p className="text-zinc-500 text-xs mt-0.5">Radio: {est.radio_metros}m</p>
-                </div>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2">
-                  <path d="M9 18l6-6-6-6"/>
-                </svg>
-              </div>
-            </button>
-          ))}
-          {loadingSnap && (
-            <p className="text-zinc-500 text-sm text-center py-4">Descargando snapshot...</p>
-          )}
-        </div>
-      )}
-
-      {/* ── VISTA: ESCANEAR ── */}
-      {vista === 'escanear' && estSeleccionado && (
-        <div className="space-y-4">
-          <div className="flex items-center gap-3 mb-2">
-            <button onClick={() => setVista('inicio')} className="text-zinc-500 hover:text-white transition-colors">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5m7-7-7 7 7 7"/></svg>
-            </button>
-            <div>
-              <p className="font-medium text-sm">{estSeleccionado.nombre}</p>
-              {snapshot && (
-                <p className="text-zinc-600 text-xs">
-                  Snapshot: {new Date(snapshot.generado_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
-                  {' · '}{snapshot.proveedores?.length ?? 0} proveedores
-                  {!online && <span className="text-yellow-500 ml-1">· offline</span>}
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Scanner QR */}
-          <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-4 space-y-3">
-            <p className="text-zinc-400 text-xs font-medium uppercase tracking-wide">Escanear QR</p>
-            <button
-              onClick={() => setScannerAbierto(true)}
-              className="w-full bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium py-4 rounded-xl transition-colors flex items-center justify-center gap-3">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/>
-                <rect x="7" y="7" width="3" height="3" rx="0.5"/><rect x="14" y="7" width="3" height="3" rx="0.5"/>
-                <rect x="7" y="14" width="3" height="3" rx="0.5"/>
-                <path d="M14 14h1v1m2-1h1v3h-3v-1"/>
-              </svg>
-              Abrir cámara y escanear QR
-            </button>
-
-            {/* Separador */}
-            <div className="flex items-center gap-2">
-              <div className="flex-1 h-px bg-white/[0.06]"/>
-              <span className="text-zinc-600 text-xs">o ingresá el token manualmente</span>
-              <div className="flex-1 h-px bg-white/[0.06]"/>
-            </div>
-
-            <input
-              value={qrInput}
-              onChange={e => setQrInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && qrInput && buscarPorQR(qrInput)}
-              placeholder="Token QR del proveedor"
-              className={inputCls}
-            />
-            {qrInput && (
-              <button
-                onClick={() => buscarPorQR(qrInput)}
-                className="w-full bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.1] text-white text-sm py-2 rounded-lg transition-colors">
-                Buscar
-              </button>
-            )}
-          </div>
-
-          {/* Lista rápida de proveedores del snapshot */}
-          {snapshot?.proveedores && snapshot.proveedores.length > 0 && (
-            <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
-              <p className="text-zinc-500 text-xs px-4 pt-3 pb-2 font-medium uppercase tracking-wide">Proveedores en el establecimiento</p>
-              <div className="divide-y divide-white/[0.04]">
-                {snapshot.proveedores.slice(0, 10).map(prov => (
-                  <button key={prov.id} onClick={() => { setProv(prov); setVista('visita') }}
-                    className="w-full px-4 py-3 text-left hover:bg-white/[0.03] transition-colors flex items-center justify-between">
-                    <div>
-                      <p className="text-white text-sm">{prov.razon_social}</p>
-                      <p className="text-zinc-600 text-xs">{prov.cuit}</p>
-                    </div>
-                    <span className={`text-xs px-2 py-0.5 rounded-full border ${
-                      prov.habilitacion_estado === 'VIGENTE' ? 'bg-green-500/10 text-green-400 border-green-500/20' :
-                      prov.habilitacion_estado === 'DOC_PENDIENTE' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
-                      'bg-red-500/10 text-red-400 border-red-500/20'
-                    }`}>
-                      {prov.habilitacion_estado ?? prov.estado}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── VISTA: REGISTRAR VISITA ── */}
-      {vista === 'visita' && proveedorEncontrado && (
-        <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <button onClick={() => { setProv(null); setVista('escanear') }} className="text-zinc-500 hover:text-white transition-colors">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5m7-7-7 7 7 7"/></svg>
-            </button>
-            <p className="font-medium text-sm">{proveedorEncontrado.razon_social}</p>
-          </div>
-
-          {/* Estado del proveedor */}
-          <div className={`rounded-xl border px-4 py-3 ${
-            proveedorEncontrado.habilitacion_estado === 'VIGENTE' ? 'bg-green-500/10 border-green-500/20' :
-            proveedorEncontrado.habilitacion_estado === 'DOC_PENDIENTE' ? 'bg-yellow-500/10 border-yellow-500/20' :
-            'bg-red-500/10 border-red-500/20'
-          }`}>
-            <p className={`text-sm font-medium ${
-              proveedorEncontrado.habilitacion_estado === 'VIGENTE' ? 'text-green-400' :
-              proveedorEncontrado.habilitacion_estado === 'DOC_PENDIENTE' ? 'text-yellow-400' : 'text-red-400'
-            }`}>
-              Habilitación: {proveedorEncontrado.habilitacion_estado ?? proveedorEncontrado.estado}
-            </p>
-            {proveedorEncontrado.docs_vencidos > 0 && (
-              <p className="text-red-400 text-xs mt-1">{proveedorEncontrado.docs_vencidos} documento(s) vencido(s)</p>
-            )}
-          </div>
-
-          {/* Resultado */}
-          <div>
-            <p className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-2">Resultado de la visita</p>
-            <div className="grid grid-cols-2 gap-2">
-              {(['CONFORME','NO_CONFORME','URGENTE','OBSERVACION'] as const).map(r => (
-                <button key={r} onClick={() => setResultado(r)}
-                  className={`py-2.5 rounded-xl border text-xs font-medium transition-all ${
-                    resultado === r ? RESULTADO_COLOR[r] : 'bg-white/[0.03] border-white/[0.08] text-zinc-500'
-                  }`}>
-                  {RESULTADO_LABEL[r]}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Checklist */}
-          {snapshot?.checklist && snapshot.checklist.length > 0 && (
-            <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-4 space-y-3">
-              <p className="text-zinc-400 text-xs font-medium uppercase tracking-wide">Checklist de puntos</p>
-              {snapshot.checklist.map(item => (
-                <div key={item.id} className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <p className="text-white text-sm">{item.nombre}</p>
-                    <div className="flex gap-1">
-                      <button
-                        onClick={() => setChecklistResp(prev => ({ ...prev, [item.id]: { cumple: true, obs: prev[item.id]?.obs ?? '' } }))}
-                        className={`text-xs px-2.5 py-1 rounded-full border transition-all ${
-                          checklistResp[item.id]?.cumple === true ? 'bg-green-500/15 text-green-400 border-green-500/25' : 'bg-white/[0.03] text-zinc-500 border-white/[0.08]'
-                        }`}>Sí</button>
-                      <button
-                        onClick={() => setChecklistResp(prev => ({ ...prev, [item.id]: { cumple: false, obs: prev[item.id]?.obs ?? '' } }))}
-                        className={`text-xs px-2.5 py-1 rounded-full border transition-all ${
-                          checklistResp[item.id]?.cumple === false ? 'bg-red-500/15 text-red-400 border-red-500/25' : 'bg-white/[0.03] text-zinc-500 border-white/[0.08]'
-                        }`}>No</button>
-                    </div>
-                  </div>
-                  {checklistResp[item.id]?.cumple === false && (
-                    <input
-                      value={checklistResp[item.id]?.obs ?? ''}
-                      onChange={e => setChecklistResp(prev => ({ ...prev, [item.id]: { cumple: false, obs: e.target.value } }))}
-                      placeholder="Observación del punto..."
-                      className={inputCls + ' text-xs'}
-                    />
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Observación libre */}
-          <div>
-            <p className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-2">Observación general</p>
-            <textarea
-              value={observacion}
-              onChange={e => setObservacion(e.target.value)}
-              rows={3}
-              placeholder="Describí lo observado..."
-              className={inputCls + ' resize-none'}
-            />
-          </div>
-
-          {/* Foto */}
-          <div>
-            <p className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-2">Foto (opcional)</p>
-            {foto ? (
-              <div className="relative">
-                <img src={foto} alt="foto" className="w-full h-40 object-cover rounded-xl"/>
-                <button onClick={() => setFoto(null)}
-                  className="absolute top-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded-lg">
-                  Cambiar
-                </button>
-              </div>
-            ) : (
-              <button onClick={() => fileRef.current?.click()}
-                className="w-full bg-white/[0.03] border border-dashed border-white/[0.15] rounded-xl py-6 text-zinc-500 text-sm hover:border-white/30 transition-colors">
-                Tocar para tomar o seleccionar foto
-              </button>
-            )}
-            <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={handleFoto} className="hidden"/>
-          </div>
-
-          {/* Guardar */}
-          <button onClick={guardarVisita} disabled={guardando}
-            className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-medium py-3 rounded-xl transition-colors">
-            {guardando ? 'Guardando...' : online ? 'Guardar visita' : 'Guardar offline'}
-          </button>
-
-          {!online && (
-            <p className="text-yellow-500 text-xs text-center">Sin conexión — se sincronizará automáticamente al recuperar señal</p>
-          )}
-        </div>
-      )}
-
-      {/* ── VISTA: COLA OFFLINE ── */}
-      {vista === 'cola' && (
-        <div className="space-y-4">
-          <div className="flex items-center gap-3 mb-2">
-            <button onClick={() => setVista('inicio')} className="text-zinc-500 hover:text-white transition-colors">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5m7-7-7 7 7 7"/></svg>
-            </button>
-            <p className="font-medium text-sm">Visitas pendientes de sincronización</p>
-          </div>
-
-          {cola.length === 0 ? (
-            <p className="text-zinc-500 text-sm text-center py-8">No hay visitas en cola</p>
-          ) : (
-            <div className="space-y-3">
-              {cola.map(v => (
-                <div key={v.id} className={`bg-white/[0.03] border rounded-xl p-4 ${v.sincronizado ? 'border-green-500/20' : 'border-yellow-500/20'}`}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className={`text-xs px-2 py-0.5 rounded-full border ${RESULTADO_COLOR[v.resultado]}`}>
-                      {RESULTADO_LABEL[v.resultado]}
-                    </span>
-                    <span className={`text-xs ${v.sincronizado ? 'text-green-400' : 'text-yellow-400'}`}>
-                      {v.sincronizado ? '✓ Sincronizado' : '⟳ Pendiente'}
-                    </span>
-                  </div>
-                  <p className="text-zinc-500 text-xs">
-                    {new Date(v.visitado_at).toLocaleString('es-AR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })}
-                  </p>
-                  {v.observacion && <p className="text-zinc-400 text-xs mt-1">{v.observacion}</p>}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {pendientes > 0 && online && (
-            <button onClick={sincronizarCola} disabled={sincronizando}
-              className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-medium py-3 rounded-xl transition-colors">
-              {sincronizando ? 'Sincronizando...' : `Sincronizar ${pendientes} visita(s)`}
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-
-      {/* Scanner overlay */}
+    <>
+      {/* Scanner overlay — fuera del scroll principal */}
       {scannerAbierto && (
         <QRScanner
           onScan={(token) => { setScannerAbierto(false); buscarPorQR(token) }}
           onClose={() => setScannerAbierto(false)}
         />
       )}
-    </div>
+
+      <div className="min-h-screen bg-[#0d0f17] text-white max-w-sm mx-auto px-4 py-6">
+
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <p className="text-xs text-zinc-500 mb-0.5">Sistema Legajos</p>
+            <h1 className="text-lg font-medium">App de auditoría</h1>
+          </div>
+          <div className="flex items-center gap-2">
+            {pendientes > 0 && (
+              <button onClick={() => setVista('cola')}
+                className="text-xs bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 px-2 py-1 rounded-full">
+                {pendientes} pendiente{pendientes > 1 ? 's' : ''}
+              </button>
+            )}
+            <div className={`w-2 h-2 rounded-full ${online ? 'bg-green-400' : 'bg-red-400'}`}
+              title={online ? 'Online' : 'Offline'}/>
+          </div>
+        </div>
+
+        {/* Flash */}
+        {msg && (
+          <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3 mb-4">
+            <p className="text-blue-300 text-sm">{sincronizando ? '⟳ Sincronizando...' : msg}</p>
+          </div>
+        )}
+
+        {/* ── INICIO ── */}
+        {vista === 'inicio' && (
+          <div className="space-y-3">
+            <p className="text-zinc-500 text-sm mb-4">Seleccioná un establecimiento para auditar</p>
+            {establecimientos.map(est => (
+              <button key={est.id} onClick={() => seleccionarEst(est)} disabled={loadingSnap}
+                className="w-full bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.08] rounded-2xl p-4 text-left transition-all">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium text-sm">{est.nombre}</p>
+                    <p className="text-zinc-500 text-xs mt-0.5">Radio: {est.radio_metros}m</p>
+                  </div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2">
+                    <path d="M9 18l6-6-6-6"/>
+                  </svg>
+                </div>
+              </button>
+            ))}
+            {loadingSnap && <p className="text-zinc-500 text-sm text-center py-4">Descargando snapshot...</p>}
+          </div>
+        )}
+
+        {/* ── ESCANEAR ── */}
+        {vista === 'escanear' && estSeleccionado && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 mb-2">
+              <button onClick={() => setVista('inicio')} className="text-zinc-500 hover:text-white transition-colors">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5m7-7-7 7 7 7"/></svg>
+              </button>
+              <div>
+                <p className="font-medium text-sm">{estSeleccionado.nombre}</p>
+                {snapshot && (
+                  <p className="text-zinc-600 text-xs">
+                    Snapshot: {new Date(snapshot.generado_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                    {' · '}{snapshot.proveedores?.length ?? 0} proveedores
+                    {!online && <span className="text-yellow-500 ml-1">· offline</span>}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Botón cámara principal */}
+            <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-4 space-y-3">
+              <p className="text-zinc-400 text-xs font-medium uppercase tracking-wide">Escanear QR</p>
+              <button onClick={() => setScannerAbierto(true)}
+                className="w-full bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium py-4 rounded-xl transition-colors flex items-center justify-center gap-3">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/>
+                  <rect x="7" y="7" width="3" height="3" rx="0.5"/>
+                  <rect x="14" y="7" width="3" height="3" rx="0.5"/>
+                  <rect x="7" y="14" width="3" height="3" rx="0.5"/>
+                  <path d="M14 14h1v1m2-1h1v3h-3v-1"/>
+                </svg>
+                Abrir cámara y escanear QR
+              </button>
+
+              <div className="flex items-center gap-2">
+                <div className="flex-1 h-px bg-white/[0.06]"/>
+                <span className="text-zinc-600 text-xs">o ingresá el token manualmente</span>
+                <div className="flex-1 h-px bg-white/[0.06]"/>
+              </div>
+
+              <input value={qrInput} onChange={e => setQrInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && qrInput && buscarPorQR(qrInput)}
+                placeholder="Token QR del proveedor" className={inputCls}/>
+              {qrInput && (
+                <button onClick={() => buscarPorQR(qrInput)}
+                  className="w-full bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.1] text-white text-sm py-2 rounded-lg transition-colors">
+                  Buscar
+                </button>
+              )}
+            </div>
+
+            {/* Lista rápida */}
+            {snapshot?.proveedores && snapshot.proveedores.length > 0 && (
+              <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
+                <p className="text-zinc-500 text-xs px-4 pt-3 pb-2 font-medium uppercase tracking-wide">Proveedores en el establecimiento</p>
+                <div className="divide-y divide-white/[0.04]">
+                  {snapshot.proveedores.slice(0, 10).map(prov => (
+                    <button key={prov.id} onClick={() => { setProv(prov); setVista('visita') }}
+                      className="w-full px-4 py-3 text-left hover:bg-white/[0.03] transition-colors flex items-center justify-between">
+                      <div>
+                        <p className="text-white text-sm">{prov.razon_social}</p>
+                        <p className="text-zinc-600 text-xs">{prov.cuit}</p>
+                      </div>
+                      <span className={`text-xs px-2 py-0.5 rounded-full border ${
+                        prov.habilitacion_estado === 'VIGENTE'      ? 'bg-green-500/10 text-green-400 border-green-500/20' :
+                        prov.habilitacion_estado === 'DOC_PENDIENTE'? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
+                        'bg-red-500/10 text-red-400 border-red-500/20'
+                      }`}>
+                        {prov.habilitacion_estado ?? prov.estado}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── VISITA ── */}
+        {vista === 'visita' && proveedorEncontrado && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <button onClick={() => { setProv(null); setVista('escanear') }} className="text-zinc-500 hover:text-white transition-colors">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5m7-7-7 7 7 7"/></svg>
+              </button>
+              <p className="font-medium text-sm">{proveedorEncontrado.razon_social}</p>
+            </div>
+
+            {/* Estado */}
+            <div className={`rounded-xl border px-4 py-3 ${
+              proveedorEncontrado.habilitacion_estado === 'VIGENTE'       ? 'bg-green-500/10 border-green-500/20' :
+              proveedorEncontrado.habilitacion_estado === 'DOC_PENDIENTE' ? 'bg-yellow-500/10 border-yellow-500/20' :
+              'bg-red-500/10 border-red-500/20'
+            }`}>
+              <p className={`text-sm font-medium ${
+                proveedorEncontrado.habilitacion_estado === 'VIGENTE'       ? 'text-green-400' :
+                proveedorEncontrado.habilitacion_estado === 'DOC_PENDIENTE' ? 'text-yellow-400' : 'text-red-400'
+              }`}>Habilitación: {proveedorEncontrado.habilitacion_estado ?? proveedorEncontrado.estado}</p>
+              {proveedorEncontrado.docs_vencidos > 0 && (
+                <p className="text-red-400 text-xs mt-1">{proveedorEncontrado.docs_vencidos} documento(s) vencido(s)</p>
+              )}
+            </div>
+
+            {/* Resultado */}
+            <div>
+              <p className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-2">Resultado de la visita</p>
+              <div className="grid grid-cols-2 gap-2">
+                {(['CONFORME','NO_CONFORME','URGENTE','OBSERVACION'] as const).map(r => (
+                  <button key={r} onClick={() => setResultado(r)}
+                    className={`py-2.5 rounded-xl border text-xs font-medium transition-all ${
+                      resultado === r ? RESULTADO_COLOR[r] : 'bg-white/[0.03] border-white/[0.08] text-zinc-500'
+                    }`}>
+                    {RESULTADO_LABEL[r]}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Checklist */}
+            {snapshot?.checklist && snapshot.checklist.length > 0 && (
+              <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-4 space-y-3">
+                <p className="text-zinc-400 text-xs font-medium uppercase tracking-wide">Checklist de puntos</p>
+                {snapshot.checklist.map(item => (
+                  <div key={item.id} className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-white text-sm flex-1">{item.nombre}</p>
+                      <div className="flex gap-1 shrink-0">
+                        <button onClick={() => setChecklistResp(prev => ({ ...prev, [item.id]: { cumple: true, obs: prev[item.id]?.obs ?? '' } }))}
+                          className={`text-xs px-2.5 py-1 rounded-full border transition-all ${
+                            checklistResp[item.id]?.cumple === true ? 'bg-green-500/15 text-green-400 border-green-500/25' : 'bg-white/[0.03] text-zinc-500 border-white/[0.08]'
+                          }`}>Sí</button>
+                        <button onClick={() => setChecklistResp(prev => ({ ...prev, [item.id]: { cumple: false, obs: prev[item.id]?.obs ?? '' } }))}
+                          className={`text-xs px-2.5 py-1 rounded-full border transition-all ${
+                            checklistResp[item.id]?.cumple === false ? 'bg-red-500/15 text-red-400 border-red-500/25' : 'bg-white/[0.03] text-zinc-500 border-white/[0.08]'
+                          }`}>No</button>
+                      </div>
+                    </div>
+                    {checklistResp[item.id]?.cumple === false && (
+                      <input value={checklistResp[item.id]?.obs ?? ''}
+                        onChange={e => setChecklistResp(prev => ({ ...prev, [item.id]: { cumple: false, obs: e.target.value } }))}
+                        placeholder="Observación del punto..." className={inputCls + ' text-xs'}/>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Observación */}
+            <div>
+              <p className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-2">Observación general</p>
+              <textarea value={observacion} onChange={e => setObservacion(e.target.value)}
+                rows={3} placeholder="Describí lo observado..." className={inputCls + ' resize-none'}/>
+            </div>
+
+            {/* Foto */}
+            <div>
+              <p className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-2">Foto (opcional)</p>
+              {foto ? (
+                <div className="relative">
+                  <img src={foto} alt="foto" className="w-full h-40 object-cover rounded-xl"/>
+                  <button onClick={() => setFoto(null)}
+                    className="absolute top-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded-lg">
+                    Cambiar
+                  </button>
+                </div>
+              ) : (
+                <button onClick={() => fileRef.current?.click()}
+                  className="w-full bg-white/[0.03] border border-dashed border-white/[0.15] rounded-xl py-6 text-zinc-500 text-sm hover:border-white/30 transition-colors">
+                  Tocar para tomar o seleccionar foto
+                </button>
+              )}
+              <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={handleFoto} className="hidden"/>
+            </div>
+
+            <button onClick={guardarVisita} disabled={guardando}
+              className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-medium py-3 rounded-xl transition-colors">
+              {guardando ? 'Guardando...' : online ? 'Guardar visita' : 'Guardar offline'}
+            </button>
+
+            {!online && (
+              <p className="text-yellow-500 text-xs text-center">Sin conexión — se sincronizará automáticamente al recuperar señal</p>
+            )}
+          </div>
+        )}
+
+        {/* ── COLA ── */}
+        {vista === 'cola' && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 mb-2">
+              <button onClick={() => setVista('inicio')} className="text-zinc-500 hover:text-white transition-colors">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5m7-7-7 7 7 7"/></svg>
+              </button>
+              <p className="font-medium text-sm">Visitas pendientes de sincronización</p>
+            </div>
+            {cola.length === 0 ? (
+              <p className="text-zinc-500 text-sm text-center py-8">No hay visitas en cola</p>
+            ) : (
+              <div className="space-y-3">
+                {cola.map(v => (
+                  <div key={v.id} className={`bg-white/[0.03] border rounded-xl p-4 ${v.sincronizado ? 'border-green-500/20' : 'border-yellow-500/20'}`}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className={`text-xs px-2 py-0.5 rounded-full border ${RESULTADO_COLOR[v.resultado]}`}>
+                        {RESULTADO_LABEL[v.resultado]}
+                      </span>
+                      <span className={`text-xs ${v.sincronizado ? 'text-green-400' : 'text-yellow-400'}`}>
+                        {v.sincronizado ? '✓ Sincronizado' : '⟳ Pendiente'}
+                      </span>
+                    </div>
+                    <p className="text-zinc-500 text-xs">
+                      {new Date(v.visitado_at).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                    {v.observacion && <p className="text-zinc-400 text-xs mt-1">{v.observacion}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+            {pendientes > 0 && online && (
+              <button onClick={sincronizarCola} disabled={sincronizando}
+                className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-medium py-3 rounded-xl transition-colors">
+                {sincronizando ? 'Sincronizando...' : `Sincronizar ${pendientes} visita(s)`}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </>
   )
 }
