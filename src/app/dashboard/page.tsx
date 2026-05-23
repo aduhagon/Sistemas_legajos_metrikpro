@@ -22,29 +22,54 @@ export default async function DashboardPage() {
   const hoy = new Date()
   const en7dias = new Date(hoy)
   en7dias.setDate(hoy.getDate() + 7)
+  const hoyStr = hoy.toISOString().split('T')[0]
+  const en7diasStr = en7dias.toISOString().split('T')[0]
 
+  // Docs del legajo por vencer
   const { data: porVencer } = await supabase
     .from('documentos_legajo')
     .select('id, fecha_venc, documentos_requeridos(nombre), proveedores(id, razon_social)')
     .not('fecha_venc', 'is', null)
-    .lte('fecha_venc', en7dias.toISOString().split('T')[0])
-    .gte('fecha_venc', hoy.toISOString().split('T')[0])
+    .lte('fecha_venc', en7diasStr)
+    .gte('fecha_venc', hoyStr)
     .in('estado', ['CARGADO', 'APROBADO'])
     .order('fecha_venc')
     .limit(5)
 
+  // Docs de EQUIPOS por vencer en 7 días
+  const { data: equiposPorVencer } = await supabase
+    .from('documentos_equipo')
+    .select(`
+      id, fecha_venc,
+      documentos_requeridos_equipo(nombre),
+      equipos_contratista(dominio, tipos_equipo(icono), proveedores(id, razon_social))
+    `)
+    .not('fecha_venc', 'is', null)
+    .lte('fecha_venc', en7diasStr)
+    .gte('fecha_venc', hoyStr)
+    .in('estado', ['CARGADO', 'APROBADO'])
+    .order('fecha_venc')
+    .limit(5)
+
+  // Docs de equipos VENCIDOS (para badge de urgencia)
+  const { count: equiposVencidos } = await supabase
+    .from('documentos_equipo')
+    .select('*', { count: 'exact', head: true })
+    .eq('estado', 'VENCIDO')
+
   return (
     <div>
-      {/* Alerta vencimientos */}
+
+      {/* Alerta vencimientos — legajo */}
       {porVencer && porVencer.length > 0 && (
-        <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-2xl p-4 mb-6 flex items-start gap-3">
+        <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-2xl p-4 mb-4 flex items-start gap-3">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#eab308" strokeWidth="2" className="shrink-0 mt-0.5">
             <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
             <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
           </svg>
           <div className="flex-1">
             <p className="text-yellow-400 text-sm font-medium mb-1">
-              {porVencer.length} documento{porVencer.length > 1 ? 's' : ''} por vencer en los próximos 7 días
+              {porVencer.length} documento{porVencer.length > 1 ? 's' : ''} de legajo por vencer en los próximos 7 días
             </p>
             <div className="space-y-0.5">
               {porVencer.map((doc: any) => (
@@ -60,6 +85,58 @@ export default async function DashboardPage() {
                 </p>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Alerta vencimientos — equipos */}
+      {((equiposPorVencer && equiposPorVencer.length > 0) || (equiposVencidos && equiposVencidos > 0)) && (
+        <div className={`border rounded-2xl p-4 mb-4 flex items-start gap-3 ${
+          equiposVencidos && equiposVencidos > 0
+            ? 'bg-red-500/5 border-red-500/20'
+            : 'bg-orange-500/5 border-orange-500/20'
+        }`}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+            stroke={equiposVencidos && equiposVencidos > 0 ? '#ef4444' : '#f97316'}
+            strokeWidth="2" className="shrink-0 mt-0.5">
+            <rect x="1" y="3" width="15" height="13" rx="1"/>
+            <path d="M16 8h4l3 3v4h-7z"/>
+            <circle cx="5.5" cy="18.5" r="2.5"/>
+            <circle cx="18.5" cy="18.5" r="2.5"/>
+          </svg>
+          <div className="flex-1">
+            {equiposVencidos && equiposVencidos > 0 && (
+              <p className="text-red-400 text-sm font-medium mb-1">
+                🔴 {equiposVencidos} documento{equiposVencidos > 1 ? 's' : ''} de equipos vencido{equiposVencidos > 1 ? 's' : ''}
+                {' '}<Link href="/dashboard/reportes" className="text-red-300 hover:text-red-200 underline transition-colors">Ver en reportes →</Link>
+              </p>
+            )}
+            {equiposPorVencer && equiposPorVencer.length > 0 && (
+              <>
+                <p className={`text-sm font-medium mb-1 ${equiposVencidos && equiposVencidos > 0 ? 'text-orange-400' : 'text-orange-300'}`}>
+                  {equiposPorVencer.length} documento{equiposPorVencer.length > 1 ? 's' : ''} de equipos por vencer en 7 días
+                </p>
+                <div className="space-y-0.5">
+                  {equiposPorVencer.map((doc: any) => {
+                    const equipo = doc.equipos_contratista
+                    return (
+                      <p key={doc.id} className="text-zinc-500 text-xs">
+                        <span className="mr-1">{equipo?.tipos_equipo?.icono}</span>
+                        <Link href={`/dashboard/legajos/${equipo?.proveedores?.id}`}
+                          className="text-zinc-400 hover:text-white transition-colors">
+                          {equipo?.proveedores?.razon_social}
+                        </Link>
+                        {' · '}<span className="font-mono text-zinc-500">{equipo?.dominio}</span>
+                        {' — '}{doc.documentos_requeridos_equipo?.nombre}
+                        <span className="text-orange-600 ml-1">
+                          ({new Date(doc.fecha_venc).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })})
+                        </span>
+                      </p>
+                    )
+                  })}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -116,16 +193,22 @@ export default async function DashboardPage() {
           <p className="text-zinc-500 text-xs">Registro y documentación</p>
         </Link>
 
-        <Link href="/dashboard/configuracion"
+        <Link href="/dashboard/reportes"
           className="bg-white/[0.03] hover:bg-white/[0.05] border border-white/[0.08] rounded-xl p-5 transition-all group">
-          <div className="w-8 h-8 bg-zinc-500/10 border border-zinc-500/20 rounded-lg flex items-center justify-center mb-3">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" strokeWidth="2">
-              <circle cx="12" cy="12" r="3"/>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          <div className="w-8 h-8 bg-purple-500/10 border border-purple-500/20 rounded-lg flex items-center justify-center mb-3">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#c084fc" strokeWidth="2">
+              <line x1="18" y1="20" x2="18" y2="10"/>
+              <line x1="12" y1="20" x2="12" y2="4"/>
+              <line x1="6" y1="20" x2="6" y2="14"/>
             </svg>
           </div>
-          <p className="font-medium text-sm group-hover:text-zinc-300 transition-colors mb-1">Configuración</p>
-          <p className="text-zinc-500 text-xs">Email y ajustes del sistema</p>
+          <p className="font-medium text-sm group-hover:text-purple-300 transition-colors mb-1">Reportes</p>
+          <p className="text-zinc-500 text-xs">Métricas y exportación</p>
+          {(equiposVencidos ?? 0) > 0 && (
+            <span className="mt-2 inline-block bg-red-500/10 text-red-400 border border-red-500/20 text-xs px-2 py-0.5 rounded-full">
+              {equiposVencidos} equipo{(equiposVencidos ?? 0) > 1 ? 's' : ''} vencido{(equiposVencidos ?? 0) > 1 ? 's' : ''}
+            </span>
+          )}
         </Link>
       </div>
     </div>
