@@ -3,10 +3,11 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase-client'
 import { QRCodeSVG } from 'qrcode.react'
+import AuditoriasProveedor from '@/components/AuditoriasProveedor'
 
 // 'historial' = historial de documentos (aprobaciones, rechazos, cargas)
 // 'accesos'   = registros de ingreso/egreso GPS
-type Vista = 'qr' | 'docs' | 'equipos' | 'operarios' | 'historial' | 'accesos' | 'perfil'
+type Vista = 'qr' | 'docs' | 'equipos' | 'operarios' | 'historial' | 'accesos' | 'perfil' | 'auditorias'
 
 type Props = {
   proveedor: any
@@ -17,6 +18,7 @@ type Props = {
   historialPorDoc: Record<string, any[]>
   miRol: 'titular' | 'operario'
   equiposSlot?: React.ReactNode
+  visitasAuditoria?: any[]
 }
 
 const TAB_ICONS: Record<string, string> = {
@@ -25,7 +27,8 @@ const TAB_ICONS: Record<string, string> = {
   historial: '🕐',
   operarios: '👥',
   accesos:   '📍',
-  perfil:    '👤',
+  perfil:       '👤',
+  auditorias:   '📋',
 }
 
 export default function PortalClient({
@@ -37,6 +40,7 @@ export default function PortalClient({
   historialPorDoc,
   miRol,
   equiposSlot,
+  visitasAuditoria = [],
 }: Props) {
   const [proveedor] = useState(provInit)
   const [docs, setDocs] = useState(docsInit)
@@ -258,7 +262,8 @@ export default function PortalClient({
     { key: 'historial', label: 'Historial' },
     { key: 'operarios', label: 'Personal' },
     { key: 'accesos',   label: 'Accesos' },
-    { key: 'perfil',    label: 'Perfil' },
+    { key: 'perfil',      label: 'Perfil' },
+    { key: 'auditorias',  label: 'Auditorías' },
   ]
 
   const docsConProblemas = docs.filter((d: any) => ['RECHAZADO', 'VENCIDO'].includes(d.estado)).length
@@ -686,6 +691,11 @@ export default function PortalClient({
                   </div>
                 )}
               </div>
+            )}
+
+            {/* ── AUDITORÍAS ── */}
+            {vista === 'auditorias' && (
+              <AuditoriasProveedor visitas={visitasAuditoria} />
             )}
 
             {/* ── PERFIL ── */}

@@ -21,6 +21,7 @@ export default async function ProveedorPortalPage() {
     { data: operarios },
     { data: equipos },
     { data: tiposEquipo },
+    { data: visitasAuditoria },
   ] = await Promise.all([
     supabase
       .from('proveedores')
@@ -58,6 +59,20 @@ export default async function ProveedorPortalPage() {
       .select('id, nombre, icono')
       .eq('activo', true)
       .order('nombre'),
+    supabase
+      .from('visitas_auditoria')
+      .select(`
+        id, visitado_at, resultado, estado_supervision,
+        observacion, supervision_obs, lat, lng,
+        auditor:auditor_id ( nombre ),
+        establecimiento:establecimiento_id ( nombre ),
+        checklist:visitas_checklist (
+          cumple, observacion,
+          item:checklist_id ( nombre )
+        )
+      `)
+      .eq('proveedor_id', provVerif.proveedor_id)
+      .order('visitado_at', { ascending: false }),
   ])
 
   if (!proveedor) redirect('/proveedor/login')
@@ -99,6 +114,7 @@ export default async function ProveedorPortalPage() {
       accesos={accesos}
       historialPorDoc={historialPorDoc}
       miRol={provVerif.rol}
+      visitasAuditoria={visitasAuditoria ?? []}
       equiposSlot={
         <EquiposProveedor
           proveedorId={provVerif.proveedor_id}

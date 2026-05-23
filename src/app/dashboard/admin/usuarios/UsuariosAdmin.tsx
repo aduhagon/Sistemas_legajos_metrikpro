@@ -18,6 +18,7 @@ const ROL_LABEL: Record<string, string> = {
   evaluador:        'Supervisor',
   operario:         'Operario',
   operador_acceso:  'Portero',
+  auditor:          'Auditor',
 }
 
 const ROL_DESC: Record<string, string> = {
@@ -25,6 +26,7 @@ const ROL_DESC: Record<string, string> = {
   evaluador:       'Legajos, aprobación y reportes',
   operario:        'Revisión y aprobación de documentos',
   operador_acceso: 'Solo escaneo QR en punto de acceso',
+  auditor:         'Auditorías en campo con soporte offline',
 }
 
 const ROL_COLOR: Record<string, string> = {
@@ -32,9 +34,10 @@ const ROL_COLOR: Record<string, string> = {
   evaluador:       'bg-blue-500/10 text-blue-400 border-blue-500/20',
   operario:        'bg-teal-500/10 text-teal-400 border-teal-500/20',
   operador_acceso: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20',
+  auditor:         'bg-orange-500/10 text-orange-400 border-orange-500/20',
 }
 
-const ROLES = ['admin', 'evaluador', 'operario', 'operador_acceso']
+const ROLES = ['admin', 'evaluador', 'operario', 'operador_acceso', 'auditor']
 
 const emptyForm = { nombre: '', email: '', rol: 'evaluador' }
 

@@ -4,6 +4,7 @@ import Link from 'next/link'
 import AccionesLegajo from './AccionesLegajo'
 import AccionesDocumento from './AccionesDocumento'
 import AccionesDocumentoEquipo from '@/components/AccionesDocumentoEquipo'
+import VisitasAuditoriaLegajo from './VisitasAuditoriaLegajo'
 
 export default async function LegajoDetallePage({ params }: { params: { id: string } }) {
   const supabase = createClient()
@@ -52,6 +53,24 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
     `)
     .eq('proveedor_id', params.id)
     .order('created_at', { ascending: false })
+
+  // Visitas de auditoría del proveedor
+  const { data: visitasAuditoria } = await supabase
+    .from('visitas_auditoria')
+    .select(`
+      id, visitado_at, resultado, estado_supervision,
+      observacion, supervision_obs, offline, lat, lng,
+      auditor:auditor_id ( nombre ),
+      checklist:visitas_checklist (
+        cumple, observacion,
+        item:checklist_id ( nombre )
+      )
+    `)
+    .eq('proveedor_id', params.id)
+    .order('visitado_at', { ascending: false })
+
+  const { data: usuario } = await supabase
+    .from('usuarios').select('rol').eq('id', user.id).single()
 
   const docs = (proveedor.documentos_legajo as any[]) ?? []
   const docsAprobados = docs.filter(d => d.estado === 'APROBADO').length
@@ -401,6 +420,17 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
             })}
           </div>
         )}
+
+        {/* ── VISITAS DE AUDITORÍA ── */}
+        {(visitasAuditoria ?? []).length > 0 || true ? (
+          <div>
+            <h2 className="text-base font-medium mb-4">Visitas de auditoría</h2>
+            <VisitasAuditoriaLegajo
+              visitas={visitasAuditoria ?? []}
+              rol={usuario?.rol ?? 'evaluador'}
+            />
+          </div>
+        ) : null}
       </div>
     </div>
   )

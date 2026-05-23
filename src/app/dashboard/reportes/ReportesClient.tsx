@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import AuditoriasReportes from './AuditoriasReportes'
 
 type Props = {
   stats: { total: number; pendientes: number; enRevision: number; aprobados: number; rechazados: number; suspendidos: number }
@@ -15,14 +16,17 @@ type Props = {
   todosEquipos: any[]
   docsEquipoVencidos: any[]
   docsEquipoPorVencer: any[]
+  visitas: any[]
+  rol: string
 }
 
 export default function ReportesClient({
   stats, vencimientos, vencidos, porRubro, actividad,
   todosProveedores, accesos, establecimientos,
   todosEquipos, docsEquipoVencidos, docsEquipoPorVencer,
+  visitas, rol,
 }: Props) {
-  const [tab, setTab] = useState<'resumen' | 'accesos' | 'vencimientos' | 'proveedores' | 'equipos' | 'actividad'>('resumen')
+  const [tab, setTab] = useState<'resumen' | 'accesos' | 'vencimientos' | 'proveedores' | 'equipos' | 'actividad' | 'auditorias'>('resumen')
   const [filtroEstado, setFiltroEstado] = useState('TODOS')
   const [filtroDias, setFiltroDias] = useState(30)
   const [filtroEstab, setFiltroEstab] = useState('TODOS')
@@ -184,6 +188,7 @@ export default function ReportesClient({
           { key: 'proveedores',  label: `Proveedores (${stats.total})` },
           { key: 'equipos',      label: `Equipos (${todosEquipos.length})` },
           { key: 'actividad',    label: 'Actividad' },
+          { key: 'auditorias',   label: `Auditorías (${visitas.length})` },
         ] as { key: typeof tab; label: string }[]).map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
@@ -677,6 +682,11 @@ export default function ReportesClient({
             )}
           </div>
         </div>
+      )}
+
+      {/* ── AUDITORÍAS ── */}
+      {tab === 'auditorias' && (
+        <AuditoriasReportes visitas={visitas} rol={rol} />
       )}
 
       {/* ── ACTIVIDAD ── */}
