@@ -1,11 +1,14 @@
 import { createClient } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
+import { getGrupoId } from '@/lib/grupo'
 import ReportesClient from './ReportesClient'
 
 export default async function ReportesPage() {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
+
+  const grupoId = await getGrupoId()
 
   const hoy = new Date()
   const en30dias = new Date(hoy)
@@ -66,7 +69,6 @@ export default async function ReportesPage() {
       documentos_legajo(id, estado, fecha_venc, documentos_requeridos(nombre))`)
     .order('razon_social')
 
-  // Accesos — últimos 200
   const { data: accesos } = await supabase
     .from('registros_acceso')
     .select(`id, tipo, created_at, lat, lng, dentro_perimetro,
@@ -77,6 +79,7 @@ export default async function ReportesPage() {
   const { data: establecimientos } = await supabase
     .from('establecimientos')
     .select('id, nombre')
+    .eq('grupo_id', grupoId)
     .eq('activo', true)
     .order('nombre')
 

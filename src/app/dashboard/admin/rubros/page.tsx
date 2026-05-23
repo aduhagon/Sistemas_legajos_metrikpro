@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
+import { getGrupoId } from '@/lib/grupo'
 import RubrosAdmin from './RubrosAdmin'
 
 export default async function AdminRubrosPage() {
@@ -11,14 +12,15 @@ export default async function AdminRubrosPage() {
     .from('usuarios').select('rol').eq('id', user.id).single()
   if (usuario?.rol !== 'admin') redirect('/dashboard')
 
-  // Documentos generales (rubro_id = null)
+  const grupoId = await getGrupoId()
+
   const { data: docsGenerales } = await supabase
     .from('documentos_requeridos')
     .select('id, codigo, nombre, tipo_vigencia, obligatorio, aplica_persona_fisica, aplica_persona_juridica, activo')
+    .eq('grupo_id', grupoId)
     .is('rubro_id', null)
     .order('codigo')
 
-  // Rubros con sus documentos específicos
   const { data: rubros } = await supabase
     .from('rubros')
     .select(`
@@ -28,6 +30,7 @@ export default async function AdminRubrosPage() {
         aplica_persona_fisica, aplica_persona_juridica, activo
       )
     `)
+    .eq('grupo_id', grupoId)
     .order('codigo')
 
   return (

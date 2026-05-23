@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
+import { getGrupoId } from '@/lib/grupo'
 import ConfigForm from './ConfigForm'
 
 export default async function ConfiguracionPage() {
@@ -11,11 +12,10 @@ export default async function ConfiguracionPage() {
     .from('usuarios').select('rol').eq('id', user.id).single()
   if (usuario?.rol !== 'admin') redirect('/dashboard')
 
-  const { data: grupo } = await supabase
-    .from('grupos_trabajo').select('id').eq('slug', 'metrikpro').single()
+  const grupoId = await getGrupoId()
 
   const { data: config } = await supabase
-    .from('grupos_config').select('*').eq('grupo_id', grupo?.id).single()
+    .from('grupos_config').select('*').eq('grupo_id', grupoId).single()
 
   return (
     <div>

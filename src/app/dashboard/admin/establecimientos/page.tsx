@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
+import { getGrupoId } from '@/lib/grupo'
 import EstablecimientosAdmin from './EstablecimientosAdmin'
 
 export default async function AdminEstablecimientosPage() {
@@ -11,8 +12,7 @@ export default async function AdminEstablecimientosPage() {
     .from('usuarios').select('rol').eq('id', user.id).single()
   if (usuario?.rol !== 'admin') redirect('/dashboard')
 
-  const { data: grupo } = await supabase
-    .from('grupos_trabajo').select('id').eq('slug', 'metrikpro').single()
+  const grupoId = await getGrupoId()
 
   const [
     { data: establecimientos },
@@ -26,15 +26,15 @@ export default async function AdminEstablecimientosPage() {
         tipos_establecimiento(id, nombre, icono),
         establecimientos_rubros(rubro_id, rubros(id, nombre, codigo))
       `)
-      .eq('grupo_id', grupo?.id)
+      .eq('grupo_id', grupoId)
       .order('nombre'),
     supabase.from('tipos_establecimiento')
       .select('id, nombre, icono')
-      .eq('grupo_id', grupo?.id)
+      .eq('grupo_id', grupoId)
       .eq('activo', true),
     supabase.from('rubros')
       .select('id, codigo, nombre')
-      .eq('grupo_id', grupo?.id)
+      .eq('grupo_id', grupoId)
       .eq('activo', true)
       .order('codigo'),
   ])
@@ -49,7 +49,7 @@ export default async function AdminEstablecimientosPage() {
         establecimientos={(establecimientos ?? []) as any[]}
         tipos={tipos ?? []}
         rubros={rubros ?? []}
-        grupoId={grupo?.id ?? ''}
+        grupoId={grupoId}
       />
     </div>
   )

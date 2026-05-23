@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
+import { getGrupoId } from '@/lib/grupo'
 import EquiposAdmin from './EquiposAdmin'
 
 export default async function AdminEquiposPage() {
@@ -11,14 +12,13 @@ export default async function AdminEquiposPage() {
     .from('usuarios').select('rol').eq('id', user.id).single()
   if (usuario?.rol !== 'admin') redirect('/dashboard')
 
-  const { data: grupo } = await supabase
-    .from('grupos_trabajo').select('id').eq('slug', 'metrikpro').single()
+  const grupoId = await getGrupoId()
 
   const [{ data: docsGenerales }, { data: tipos }] = await Promise.all([
     supabase
       .from('documentos_requeridos_equipo')
       .select('id, nombre, tipo_vigencia, obligatorio, tipo_equipo_id, activo')
-      .eq('grupo_id', grupo?.id)
+      .eq('grupo_id', grupoId)
       .is('tipo_equipo_id', null)
       .order('nombre'),
     supabase
@@ -27,7 +27,7 @@ export default async function AdminEquiposPage() {
         id, nombre, descripcion, icono, activo,
         documentos_requeridos_equipo(id, nombre, tipo_vigencia, obligatorio, tipo_equipo_id, activo)
       `)
-      .eq('grupo_id', grupo?.id)
+      .eq('grupo_id', grupoId)
       .order('nombre'),
   ])
 
@@ -43,7 +43,7 @@ export default async function AdminEquiposPage() {
       <EquiposAdmin
         tipos={(tipos ?? []) as any[]}
         docsGenerales={(docsGenerales ?? []) as any[]}
-        grupoId={grupo?.id ?? ''}
+        grupoId={grupoId}
       />
     </div>
   )

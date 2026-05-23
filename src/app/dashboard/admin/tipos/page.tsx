@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
+import { getGrupoId } from '@/lib/grupo'
 import TiposAdmin from './TiposAdmin'
 
 export default async function AdminTiposPage() {
@@ -11,8 +12,7 @@ export default async function AdminTiposPage() {
     .from('usuarios').select('rol').eq('id', user.id).single()
   if (usuario?.rol !== 'admin') redirect('/dashboard')
 
-  const { data: grupo } = await supabase
-    .from('grupos_trabajo').select('id').eq('slug', 'metrikpro').single()
+  const grupoId = await getGrupoId()
 
   const [{ data: tipos }, { data: rubros }] = await Promise.all([
     supabase.from('tipos_establecimiento')
@@ -20,11 +20,11 @@ export default async function AdminTiposPage() {
         id, nombre, descripcion, icono, activo,
         tipos_establecimiento_rubros(rubro_id, rubros(id, codigo, nombre))
       `)
-      .eq('grupo_id', grupo?.id)
+      .eq('grupo_id', grupoId)
       .order('nombre'),
     supabase.from('rubros')
       .select('id, codigo, nombre')
-      .eq('grupo_id', grupo?.id)
+      .eq('grupo_id', grupoId)
       .eq('activo', true)
       .order('codigo'),
   ])
@@ -38,7 +38,7 @@ export default async function AdminTiposPage() {
           Esta configuración aplica automáticamente a todos los establecimientos de ese tipo.
         </p>
       </div>
-      <TiposAdmin tipos={(tipos ?? []) as any[]} rubros={rubros ?? []} grupoId={grupo?.id ?? ''} />
+      <TiposAdmin tipos={(tipos ?? []) as any[]} rubros={rubros ?? []} grupoId={grupoId} />
     </div>
   )
 }

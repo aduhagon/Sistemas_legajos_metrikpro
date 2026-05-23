@@ -1,33 +1,27 @@
 import { NextResponse } from 'next/server'
 import nodemailer from 'nodemailer'
 import { createClient } from '@/lib/supabase-server'
+import { getGrupoId } from '@/lib/grupo'
 
 export async function POST(req: Request) {
   try {
     const { tipo, proveedor_id } = await req.json()
 
     const supabase = createClient()
+    const grupoId = await getGrupoId()
 
-    const { data: grupo } = await supabase
-      .from('grupos_trabajo')
-      .select('id')
-      .eq('slug', 'metrikpro')
-      .single()
-
-    // Leer config SMTP — sin smtp_password (está cifrado en la BD)
     const { data: config } = await supabase
       .from('grupos_config')
       .select('smtp_host, smtp_port, smtp_user, smtp_from_name, smtp_from_email, notif_evaluador_email')
-      .eq('grupo_id', grupo?.id)
+      .eq('grupo_id', grupoId)
       .single()
 
     if (!config?.smtp_user) {
       return NextResponse.json({ ok: false, error: 'SMTP no configurado' })
     }
 
-    // Descifrar contraseña desde Vault vía función de BD (solo service_role puede llamarla)
     const { data: smtpPassword, error: pwErr } = await supabase
-      .rpc('fn_smtp_get_password', { p_grupo_id: grupo?.id })
+      .rpc('fn_smtp_get_password', { p_grupo_id: grupoId })
 
     if (pwErr || !smtpPassword) {
       return NextResponse.json({ ok: false, error: 'No se pudo obtener la contraseña SMTP' })
