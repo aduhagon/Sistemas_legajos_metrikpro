@@ -11,8 +11,8 @@ type Visita = {
   supervision_obs: string | null
   lat: number | null
   lng: number | null
-  auditor: { nombre: string } | null
-  establecimiento: { nombre: string } | null
+  auditor: { nombre: string }[] | null
+  estabelecimiento: { nombre: string }[] | null
   checklist: { cumple: boolean; observacion: string | null; item: { nombre: string } | null }[]
 }
 
@@ -95,7 +95,7 @@ export default function AuditoriasProveedor({ visitas }: { visitas: Visita[] }) 
                     </span>
                   </div>
                   <p className="text-zinc-400 text-xs mt-0.5">
-                    {v.establecimiento?.nombre ?? '—'}
+                    {v.establecimiento?.[0]?.nombre ?? '—'}
                     {' · '}{new Date(v.visitado_at).toLocaleString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })}
                   </p>
                   {v.observacion && <p className="text-zinc-600 text-xs mt-1 truncate">{v.observacion}</p>}
@@ -131,7 +131,7 @@ export default function AuditoriasProveedor({ visitas }: { visitas: Visita[] }) 
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div>
                   <p className="text-zinc-500 text-xs mb-0.5">Establecimiento</p>
-                  <p className="text-white">{detalle.establecimiento?.nombre ?? '—'}</p>
+                  <p className="text-white">{detalle.establecimiento?.[0]?.nombre ?? '—'}</p>
                 </div>
                 <div>
                   <p className="text-zinc-500 text-xs mb-0.5">Resultado</p>
@@ -162,7 +162,7 @@ export default function AuditoriasProveedor({ visitas }: { visitas: Visita[] }) 
                           {c.cumple ? '✓' : '✗'}
                         </span>
                         <div>
-                          <p className="text-white text-sm">{c.item?.nombre ?? '—'}</p>
+                          <p className="text-white text-sm">{c.item?.[0]?.nombre ?? '—'}</p>
                           {c.observacion && <p className="text-zinc-500 text-xs mt-0.5">{c.observacion}</p>}
                         </div>
                       </div>
