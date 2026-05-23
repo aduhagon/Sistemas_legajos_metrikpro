@@ -16,6 +16,14 @@ type Visita = {
   checklist: { cumple: boolean; observacion: string | null; item: { nombre: string } | null }[]
 }
 
+
+// Helper: Supabase puede devolver joins como objeto o como array dependiendo del select
+function pick(v: any) {
+  if (v == null) return null
+  if (Array.isArray(v)) return v[0] ?? null
+  return v
+}
+
 const RESULTADO_COLOR: Record<string, string> = {
   CONFORME:    'bg-green-500/10 text-green-400 border-green-500/20',
   NO_CONFORME: 'bg-red-500/10 text-red-400 border-red-500/20',
@@ -36,7 +44,7 @@ const SUPERVISION_DESC: Record<string, string> = {
   RECHAZADA: 'El supervisor rechazó esta visita',
 }
 
-export default function AuditoriasProveedor({ visitas }: { visitas: Visita[] }) {
+export default function AuditoriasProveedor({ visitas }: { visitas: any[] }) {
   const [detalle, setDetalle] = useState<Visita | null>(null)
 
   if (visitas.length === 0) {
@@ -95,7 +103,7 @@ export default function AuditoriasProveedor({ visitas }: { visitas: Visita[] }) 
                     </span>
                   </div>
                   <p className="text-zinc-400 text-xs mt-0.5">
-                    {v.establecimiento?.nombre ?? '—'}
+                    {pick(v.establecimiento)?.nombre ?? '—'}
                     {' · '}{new Date(v.visitado_at).toLocaleString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })}
                   </p>
                   {v.observacion && <p className="text-zinc-600 text-xs mt-1 truncate">{v.observacion}</p>}
@@ -131,7 +139,7 @@ export default function AuditoriasProveedor({ visitas }: { visitas: Visita[] }) 
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div>
                   <p className="text-zinc-500 text-xs mb-0.5">Establecimiento</p>
-                  <p className="text-white">{detalle.establecimiento?.nombre ?? '—'}</p>
+                  <p className="text-white">{pick(detalle.establecimiento)?.nombre ?? '—'}</p>
                 </div>
                 <div>
                   <p className="text-zinc-500 text-xs mb-0.5">Resultado</p>
@@ -162,7 +170,7 @@ export default function AuditoriasProveedor({ visitas }: { visitas: Visita[] }) 
                           {c.cumple ? '✓' : '✗'}
                         </span>
                         <div>
-                          <p className="text-white text-sm">{c.item?.nombre ?? '—'}</p>
+                          <p className="text-white text-sm">{pick(c.item)?.nombre ?? '—'}</p>
                           {c.observacion && <p className="text-zinc-500 text-xs mt-0.5">{c.observacion}</p>}
                         </div>
                       </div>

@@ -17,6 +17,14 @@ type Visita = {
   checklist: { cumple: boolean; observacion: string | null; item: { nombre: string } | null }[]
 }
 
+
+// Helper: Supabase puede devolver joins como objeto o como array dependiendo del select
+function pick(v: any) {
+  if (v == null) return null
+  if (Array.isArray(v)) return v[0] ?? null
+  return v
+}
+
 const RESULTADO_COLOR: Record<string, string> = {
   CONFORME:    'bg-green-500/10 text-green-400 border-green-500/20',
   NO_CONFORME: 'bg-red-500/10 text-red-400 border-red-500/20',
@@ -36,7 +44,7 @@ export default function VisitasAuditoriaLegajo({
   visitas: visitas_init,
   rol,
 }: {
-  visitas: Visita[]
+  visitas: any[]
   rol: string
 }) {
   const [visitas, setVisitas]       = useState(visitas_init)
@@ -107,7 +115,7 @@ export default function VisitasAuditoriaLegajo({
                     </span>
                   </div>
                   <p className="text-zinc-400 text-xs mt-0.5">
-                    Auditor: {v.auditor?.nombre ?? '—'}
+                    Auditor: {pick(v.auditor)?.nombre ?? '—'}
                     {' · '}{new Date(v.visitado_at).toLocaleString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })}
                     {v.offline && <span className="text-zinc-600 ml-1">· offline</span>}
                   </p>
@@ -144,7 +152,7 @@ export default function VisitasAuditoriaLegajo({
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div>
                   <p className="text-zinc-500 text-xs mb-0.5">Auditor</p>
-                  <p className="text-white">{detalle.auditor?.nombre ?? '—'}</p>
+                  <p className="text-white">{pick(detalle.auditor)?.nombre ?? '—'}</p>
                 </div>
                 <div>
                   <p className="text-zinc-500 text-xs mb-0.5">Resultado</p>
@@ -174,7 +182,7 @@ export default function VisitasAuditoriaLegajo({
                           {c.cumple ? '✓' : '✗'}
                         </span>
                         <div>
-                          <p className="text-white text-sm">{c.item?.nombre ?? '—'}</p>
+                          <p className="text-white text-sm">{pick(c.item)?.nombre ?? '—'}</p>
                           {c.observacion && <p className="text-zinc-500 text-xs mt-0.5">{c.observacion}</p>}
                         </div>
                       </div>

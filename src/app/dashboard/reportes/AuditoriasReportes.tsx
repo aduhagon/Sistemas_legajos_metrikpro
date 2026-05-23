@@ -19,6 +19,14 @@ type Visita = {
   checklist: { cumple: boolean; observacion: string | null; item: { nombre: string } | null }[]
 }
 
+
+// Helper: Supabase puede devolver joins como objeto o como array dependiendo del select
+function pick(v: any) {
+  if (v == null) return null
+  if (Array.isArray(v)) return v[0] ?? null
+  return v
+}
+
 const RESULTADO_COLOR: Record<string, string> = {
   CONFORME:    'bg-green-500/10 text-green-400 border-green-500/20',
   NO_CONFORME: 'bg-red-500/10 text-red-400 border-red-500/20',
@@ -41,7 +49,7 @@ export default function AuditoriasReportes({
   visitas: visitas_init,
   rol,
 }: {
-  visitas: Visita[]
+  visitas: any[]
   rol: string
 }) {
   const [visitas, setVisitas]           = useState(visitas_init)
@@ -174,11 +182,11 @@ export default function AuditoriasReportes({
                       )}
                     </div>
                     <p className="text-white text-sm font-medium truncate">
-                      {v.proveedor?.razon_social ?? '—'}
+                      {pick(v.proveedor)?.razon_social ?? '—'}
                     </p>
                     <p className="text-zinc-500 text-xs mt-0.5">
-                      {v.establecimiento?.nombre ?? '—'}
-                      {' · '}{v.auditor?.nombre ?? '—'}
+                      {pick(v.establecimiento)?.nombre ?? '—'}
+                      {' · '}{pick(v.auditor)?.nombre ?? '—'}
                       {' · '}{new Date(v.visitado_at).toLocaleString('es-AR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })}
                     </p>
                     {v.observacion && (
@@ -201,8 +209,8 @@ export default function AuditoriasReportes({
           <div className="bg-[#13151f] border border-white/[0.1] rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.08]">
               <div>
-                <p className="font-medium">{detalle.proveedor?.razon_social}</p>
-                <p className="text-zinc-500 text-xs">{detalle.proveedor?.cuit}</p>
+                <p className="font-medium">{pick(detalle.proveedor)?.razon_social}</p>
+                <p className="text-zinc-500 text-xs">{pick(detalle.proveedor)?.cuit}</p>
               </div>
               <button onClick={() => setDetalle(null)} className="text-zinc-500 hover:text-white transition-colors">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -216,11 +224,11 @@ export default function AuditoriasReportes({
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div>
                   <p className="text-zinc-500 text-xs mb-0.5">Auditor</p>
-                  <p className="text-white">{detalle.auditor?.nombre ?? '—'}</p>
+                  <p className="text-white">{pick(detalle.auditor)?.nombre ?? '—'}</p>
                 </div>
                 <div>
                   <p className="text-zinc-500 text-xs mb-0.5">Establecimiento</p>
-                  <p className="text-white">{detalle.establecimiento?.nombre ?? '—'}</p>
+                  <p className="text-white">{pick(detalle.establecimiento)?.nombre ?? '—'}</p>
                 </div>
                 <div>
                   <p className="text-zinc-500 text-xs mb-0.5">Fecha y hora</p>
@@ -259,7 +267,7 @@ export default function AuditoriasReportes({
                           {c.cumple ? '✓' : '✗'}
                         </span>
                         <div>
-                          <p className="text-white text-sm">{c.item?.nombre ?? '—'}</p>
+                          <p className="text-white text-sm">{pick(c.item)?.nombre ?? '—'}</p>
                           {c.observacion && <p className="text-zinc-500 text-xs mt-0.5">{c.observacion}</p>}
                         </div>
                       </div>
