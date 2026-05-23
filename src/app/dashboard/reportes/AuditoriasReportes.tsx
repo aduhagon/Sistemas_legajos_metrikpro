@@ -15,7 +15,7 @@ type Visita = {
   lng: number | null
   auditor:    { nombre: string } | null
   proveedor:  { razon_social: string; cuit: string }[] | null
-  estabelecimiento: { nombre: string }[] | null
+  establecimiento: { nombre: string }[] | null
   checklist: { cumple: boolean; observacion: string | null; item: { nombre: string } | null }[]
 }
 
