@@ -19,53 +19,13 @@ type Props = {
   equiposSlot?: React.ReactNode
 }
 
-function TabIcon({ tabKey, size = 16 }: { tabKey: string; size?: number }) {
-  const s = size
-  switch (tabKey) {
-    case 'docs': return (
-      <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-        <polyline points="14 2 14 8 20 8"/>
-        <line x1="16" y1="13" x2="8" y2="13"/>
-        <line x1="16" y1="17" x2="8" y2="17"/>
-      </svg>
-    )
-    case 'equipos': return (
-      <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <rect x="1" y="3" width="15" height="13" rx="1"/>
-        <path d="M16 8h4l3 3v4h-7z"/>
-        <circle cx="5.5" cy="18.5" r="2.5"/>
-        <circle cx="18.5" cy="18.5" r="2.5"/>
-      </svg>
-    )
-    case 'historial': return (
-      <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <circle cx="12" cy="12" r="10"/>
-        <polyline points="12 6 12 12 16 14"/>
-      </svg>
-    )
-    case 'operarios': return (
-      <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-        <circle cx="9" cy="7" r="4"/>
-        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-      </svg>
-    )
-    case 'accesos': return (
-      <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
-        <circle cx="12" cy="10" r="3"/>
-      </svg>
-    )
-    case 'perfil': return (
-      <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-        <circle cx="12" cy="7" r="4"/>
-      </svg>
-    )
-    default: return null
-  }
+const TAB_ICONS: Record<string, string> = {
+  docs:      '📄',
+  equipos:   '🚗',
+  historial: '🕐',
+  operarios: '👥',
+  accesos:   '📍',
+  perfil:    '👤',
 }
 
 export default function PortalClient({
@@ -379,7 +339,7 @@ export default function PortalClient({
                   className={`flex-1 flex flex-col items-center gap-1 py-2 rounded-lg transition-all ${
                     vista === t.key ? 'bg-white/[0.08] text-white' : 'text-zinc-600 hover:text-zinc-400'
                   }`}>
-                  <TabIcon tabKey={t.key} />
+                  <span className="text-base leading-none">{TAB_ICONS[t.key]}</span>
                   <span className="text-[9px] font-medium leading-none">
                     {t.key === 'docs' && docsConProblemas > 0 ? 'Docs ⚠' : t.label}
                   </span>
@@ -420,11 +380,7 @@ export default function PortalClient({
               {habilitacion && (
                 <button onClick={() => setVista('qr')}
                   className="flex-1 flex flex-col items-center gap-1 py-2 rounded-lg bg-green-600/20 text-green-400 transition-all">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                    <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
-                    <rect x="3" y="14" width="7" height="7"/><line x1="14" y1="14" x2="21" y2="14"/>
-                    <line x1="14" y1="18" x2="21" y2="18"/><line x1="14" y1="21" x2="21" y2="21"/>
-                  </svg>
+                  <span className="text-base leading-none">▣</span>
                   <span className="text-[9px] font-medium leading-none">Mi QR</span>
                 </button>
               )}
@@ -433,7 +389,7 @@ export default function PortalClient({
                   className={`flex-1 flex flex-col items-center gap-1 py-2 rounded-lg transition-all ${
                     vista === t.key ? 'bg-white/[0.08] text-white' : 'text-zinc-600 hover:text-zinc-400'
                   }`}>
-                  <TabIcon tabKey={t.key} />
+                  <span className="text-base leading-none">{TAB_ICONS[t.key]}</span>
                   <span className="text-[9px] font-medium leading-none">
                     {t.key === 'docs' && docsConProblemas > 0 ? 'Docs ⚠' : t.label}
                   </span>
