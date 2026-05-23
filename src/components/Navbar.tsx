@@ -34,7 +34,7 @@ export default function Navbar({ nombre, rol }: Props) {
 
   const links = [
     { href: '/dashboard',           label: 'Inicio',   roles: ['admin', 'evaluador', 'operador_acceso'] },
-    { href: '/dashboard/legajos',   label: 'Legajos',  roles: ['admin', 'evaluador'] },
+    { href: '/dashboard/legajos',   label: 'Legajos',  roles: ['admin', 'evaluador', 'operario'] },
     { href: '/dashboard/reportes',  label: 'Reportes', roles: ['admin', 'evaluador'] },
   ]
 
@@ -44,6 +44,7 @@ export default function Navbar({ nombre, rol }: Props) {
     { href: '/dashboard/admin/tipos',            label: 'Tipos de establecimiento', icono: '🏢' },
     { href: '/dashboard/admin/establecimientos', label: 'Establecimientos',     icono: '📍' },
     { href: '/dashboard/admin/equipos',          label: 'Tipos de equipo',      icono: '🚗' },
+    { href: '/dashboard/admin/usuarios',         label: 'Usuarios internos',    icono: '👥' },
   ]
 
   const esAdmin = rol === 'admin'
