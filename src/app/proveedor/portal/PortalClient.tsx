@@ -205,9 +205,12 @@ export default function PortalClient({
     URL.revokeObjectURL(url)
   }
 
-  const qrUrl = habilitacion
-    ? `${typeof window !== 'undefined' ? window.location.origin : ''}/qr/${habilitacion.qr_token}`
-    : ''
+  const [qrUrl, setQrUrl] = useState('')
+  useEffect(() => {
+    if (habilitacion) {
+      setQrUrl(`${window.location.origin}/qr/${habilitacion.qr_token}`)
+    }
+  }, [habilitacion])
 
   const estadoDocCfg: Record<string, { label: string; color: string }> = {
     PENDIENTE: { label: 'Pendiente', color: 'zinc' },
@@ -321,7 +324,7 @@ export default function PortalClient({
             <div className="flex items-center gap-2 mb-6">
               <span className="bg-green-500/10 text-green-400 border border-green-500/20 text-sm px-3 py-1 rounded-full">✓ Habilitado</span>
               {habilitacion.fecha_venc && (
-                <span className="text-zinc-500 text-xs">hasta {new Date(habilitacion.fecha_venc).toLocaleDateString('es-AR')}</span>
+                <span className="text-zinc-500 text-xs" suppressHydrationWarning>hasta {new Date(habilitacion.fecha_venc).toLocaleDateString('es-AR')}</span>
               )}
             </div>
             <div className="bg-white rounded-3xl p-6 mb-6 shadow-2xl">
@@ -422,7 +425,7 @@ export default function PortalClient({
                             <div className="flex items-center gap-3 flex-wrap">
                               <span className="text-zinc-600 text-xs">{dr?.tipo_vigencia}</span>
                               {doc.fecha_venc && (
-                                <span className="text-zinc-500 text-xs">Vence: {new Date(doc.fecha_venc).toLocaleDateString('es-AR')}</span>
+                                <span className="text-zinc-500 text-xs" suppressHydrationWarning>Vence: {new Date(doc.fecha_venc).toLocaleDateString('es-AR')}</span>
                               )}
                               {doc.observaciones && <span className="text-orange-400 text-xs">⚠ {doc.observaciones}</span>}
                               {uploadOk === doc.id && <span className="text-green-400 text-xs">✓ Subido</span>}
@@ -515,10 +518,10 @@ export default function PortalClient({
                             {/* Fecha */}
                             <div className="text-right shrink-0">
                               <p className="text-zinc-500 text-xs">
-                                {new Date(ev.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+                                <span suppressHydrationWarning>{new Date(ev.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' })}</span>
                               </p>
                               <p className="text-zinc-700 text-xs">
-                                {new Date(ev.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                                <span suppressHydrationWarning>{new Date(ev.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}</span>
                               </p>
                             </div>
                           </div>
@@ -666,7 +669,7 @@ export default function PortalClient({
                             {acc.tipo === 'INGRESO' ? '→ Ingreso' : '← Egreso'}
                           </p>
                           <p className="text-zinc-600 text-xs">
-                            {new Date(acc.created_at).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                            <span suppressHydrationWarning>{new Date(acc.created_at).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
                           </p>
                         </div>
                         {acc.lat && acc.lng && (
