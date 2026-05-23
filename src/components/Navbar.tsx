@@ -33,23 +33,48 @@ export default function Navbar({ nombre, rol }: Props) {
   }
 
   const links = [
-    { href: '/dashboard',           label: 'Inicio',   roles: ['admin', 'evaluador', 'operador_acceso'] },
-    { href: '/dashboard/legajos',   label: 'Legajos',  roles: ['admin', 'evaluador', 'operario'] },
-    { href: '/auditor',              label: 'Auditoría', roles: ['admin', 'evaluador', 'auditor'] },
-    { href: '/dashboard/reportes',  label: 'Reportes', roles: ['admin', 'evaluador'] },
+    { href: '/dashboard',          label: 'Inicio',    roles: ['admin', 'evaluador', 'operador_acceso'] },
+    { href: '/dashboard/legajos',  label: 'Legajos',   roles: ['admin', 'evaluador', 'operario'] },
+    { href: '/auditor',            label: 'Auditoría', roles: ['admin', 'evaluador', 'auditor'] },
+    { href: '/dashboard/reportes', label: 'Reportes',  roles: ['admin', 'evaluador'] },
   ]
 
-  const adminLinks = [
-    { href: '/dashboard/configuracion',          label: 'Configuración',        icono: '⚙️' },
-    { href: '/dashboard/admin/rubros',           label: 'Rubros y documentos',  icono: '📄' },
-    { href: '/dashboard/admin/tipos',            label: 'Tipos de establecimiento', icono: '🏢' },
-    { href: '/dashboard/admin/establecimientos', label: 'Establecimientos',     icono: '📍' },
-    { href: '/dashboard/admin/equipos',          label: 'Tipos de equipo',      icono: '🚗' },
-    { href: '/dashboard/admin/usuarios',         label: 'Usuarios internos',    icono: '👥' },
+  // UX-P-07: menú Admin reorganizado en dos grupos con separador visual
+  // Grupo 1 — Configuración del sistema
+  const adminLinksConfig = [
+    { href: '/dashboard/configuracion',          label: 'Configuración',    icono: '⚙️' },
+    { href: '/dashboard/admin/usuarios',         label: 'Usuarios internos', icono: '👥' },
   ]
+  // Grupo 2 — Catálogos y datos del sistema
+  const adminLinksCatalogos = [
+    { href: '/dashboard/admin/rubros',           label: 'Rubros y documentos',       icono: '📄' },
+    { href: '/dashboard/admin/tipos',            label: 'Tipos de establecimiento',  icono: '🏢' },
+    { href: '/dashboard/admin/establecimientos', label: 'Establecimientos',          icono: '📍' },
+    { href: '/dashboard/admin/equipos',          label: 'Tipos de equipo',           icono: '🚗' },
+    { href: '/dashboard/admin/checklist',        label: 'Checklist de auditoría',    icono: '✅' },
+  ]
+
+  const adminLinks = [...adminLinksConfig, ...adminLinksCatalogos]
 
   const esAdmin = rol === 'admin'
   const adminActivo = adminLinks.some(l => pathname.startsWith(l.href))
+
+  function NavLink({ link }: { link: typeof adminLinksConfig[0] }) {
+    const activo = pathname.startsWith(link.href)
+    return (
+      <Link
+        href={link.href}
+        onClick={() => setAdminOpen(false)}
+        className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-all ${
+          activo
+            ? 'bg-white/[0.06] text-white'
+            : 'text-zinc-400 hover:bg-white/[0.04] hover:text-white'
+        }`}>
+        <span className="text-base">{link.icono}</span>
+        {link.label}
+      </Link>
+    )
+  }
 
   return (
     <nav className="border-b border-white/[0.06] bg-[#0a0c12]/80 backdrop-blur sticky top-0 z-50">
@@ -75,7 +100,9 @@ export default function Navbar({ nombre, rol }: Props) {
               return (
                 <Link key={link.href} href={link.href}
                   className={`px-3 py-1.5 rounded-lg text-sm transition-all ${
-                    activo ? 'bg-white/[0.08] text-white' : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04]'
+                    activo
+                      ? 'bg-white/[0.08] text-white'
+                      : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04]'
                   }`}>
                   {link.label}
                 </Link>
@@ -85,9 +112,12 @@ export default function Navbar({ nombre, rol }: Props) {
             {/* Dropdown Admin */}
             {esAdmin && (
               <div ref={adminRef} className="relative">
-                <button onClick={() => setAdminOpen(!adminOpen)}
+                <button
+                  onClick={() => setAdminOpen(!adminOpen)}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-all ${
-                    adminActivo || adminOpen ? 'bg-white/[0.08] text-white' : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04]'
+                    adminActivo || adminOpen
+                      ? 'bg-white/[0.08] text-white'
+                      : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04]'
                   }`}>
                   Admin
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
@@ -97,20 +127,24 @@ export default function Navbar({ nombre, rol }: Props) {
                 </button>
 
                 {adminOpen && (
-                  <div className="absolute top-full left-0 mt-1.5 w-56 bg-[#0f1117] border border-white/[0.1] rounded-xl shadow-xl overflow-hidden z-50">
-                    {adminLinks.map(link => {
-                      const activo = pathname.startsWith(link.href)
-                      return (
-                        <Link key={link.href} href={link.href}
-                          onClick={() => setAdminOpen(false)}
-                          className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-all ${
-                            activo ? 'bg-white/[0.06] text-white' : 'text-zinc-400 hover:bg-white/[0.04] hover:text-white'
-                          }`}>
-                          <span className="text-base">{link.icono}</span>
-                          {link.label}
-                        </Link>
-                      )
-                    })}
+                  <div className="absolute top-full left-0 mt-1.5 w-60 bg-[#0f1117] border border-white/[0.1] rounded-xl shadow-xl overflow-hidden z-50">
+
+                    {/* Grupo 1: Configuración */}
+                    <div className="px-4 pt-3 pb-1">
+                      <p className="text-zinc-600 text-xs font-medium uppercase tracking-wider">Configuración</p>
+                    </div>
+                    {adminLinksConfig.map(link => <NavLink key={link.href} link={link}/>)}
+
+                    {/* Separador */}
+                    <div className="mx-4 my-1.5 border-t border-white/[0.06]"/>
+
+                    {/* Grupo 2: Catálogos */}
+                    <div className="px-4 pt-1 pb-1">
+                      <p className="text-zinc-600 text-xs font-medium uppercase tracking-wider">Catálogos</p>
+                    </div>
+                    {adminLinksCatalogos.map(link => <NavLink key={link.href} link={link}/>)}
+
+                    <div className="h-1.5"/>
                   </div>
                 )}
               </div>
@@ -126,7 +160,8 @@ export default function Navbar({ nombre, rol }: Props) {
               {rol.replace('_', ' ')}
             </span>
           </div>
-          <button onClick={handleLogout}
+          <button
+            onClick={handleLogout}
             className="text-zinc-600 hover:text-zinc-300 text-xs transition-colors flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-white/[0.04]">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
