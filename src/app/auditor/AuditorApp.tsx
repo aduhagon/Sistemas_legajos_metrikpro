@@ -214,7 +214,7 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
           p_lng: visita.lng ?? null,
           p_offline: true,
           p_visitado_at: visita.visitado_at,
-          p_checklist: JSON.stringify(visita.checklist),
+          p_checklist: visita.checklist,  // ✅ FIX: era JSON.stringify(visita.checklist)
         })
         if (data?.ok) {
           const idx = nuevaQ.findIndex(v => v.id === visita.id)
@@ -291,7 +291,7 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
         p_lng: gps?.lng ?? null,
         p_offline: false,
         p_visitado_at: ahora,
-        p_checklist: JSON.stringify(checklistArr),
+        p_checklist: checklistArr,  // ✅ FIX: era JSON.stringify(checklistArr)
       })
       if (data?.ok) { setMsg('Visita registrada'); resetVisita() }
       else setMsg('Error al guardar')
