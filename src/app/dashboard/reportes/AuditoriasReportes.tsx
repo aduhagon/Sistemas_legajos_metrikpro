@@ -14,8 +14,8 @@ type Visita = {
   lat: number | null
   lng: number | null
   auditor:    { nombre: string } | null
-  proveedor:  { razon_social: string; cuit: string }[] | null
-  establecimiento: { nombre: string }[] | null
+  proveedor:  { razon_social: string; cuit: string } | null
+  establecimiento: { nombre: string } | null
   checklist: { cumple: boolean; observacion: string | null; item: { nombre: string } | null }[]
 }
 
@@ -174,11 +174,11 @@ export default function AuditoriasReportes({
                       )}
                     </div>
                     <p className="text-white text-sm font-medium truncate">
-                      {v.proveedor?.[0]?.razon_social ?? '—'}
+                      {v.proveedor?.razon_social ?? '—'}
                     </p>
                     <p className="text-zinc-500 text-xs mt-0.5">
-                      {v.establecimiento?.[0]?.nombre ?? '—'}
-                      {' · '}{v.auditor?.[0]?.nombre ?? '—'}
+                      {v.establecimiento?.nombre ?? '—'}
+                      {' · '}{v.auditor?.nombre ?? '—'}
                       {' · '}{new Date(v.visitado_at).toLocaleString('es-AR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })}
                     </p>
                     {v.observacion && (
@@ -201,8 +201,8 @@ export default function AuditoriasReportes({
           <div className="bg-[#13151f] border border-white/[0.1] rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.08]">
               <div>
-                <p className="font-medium">{detalle.proveedor?.[0]?.razon_social}</p>
-                <p className="text-zinc-500 text-xs">{detalle.proveedor?.[0]?.cuit}</p>
+                <p className="font-medium">{detalle.proveedor?.razon_social}</p>
+                <p className="text-zinc-500 text-xs">{detalle.proveedor?.cuit}</p>
               </div>
               <button onClick={() => setDetalle(null)} className="text-zinc-500 hover:text-white transition-colors">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -216,11 +216,11 @@ export default function AuditoriasReportes({
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div>
                   <p className="text-zinc-500 text-xs mb-0.5">Auditor</p>
-                  <p className="text-white">{detalle.auditor?.[0]?.nombre ?? '—'}</p>
+                  <p className="text-white">{detalle.auditor?.nombre ?? '—'}</p>
                 </div>
                 <div>
                   <p className="text-zinc-500 text-xs mb-0.5">Establecimiento</p>
-                  <p className="text-white">{detalle.establecimiento?.[0]?.nombre ?? '—'}</p>
+                  <p className="text-white">{detalle.establecimiento?.nombre ?? '—'}</p>
                 </div>
                 <div>
                   <p className="text-zinc-500 text-xs mb-0.5">Fecha y hora</p>
@@ -259,7 +259,7 @@ export default function AuditoriasReportes({
                           {c.cumple ? '✓' : '✗'}
                         </span>
                         <div>
-                          <p className="text-white text-sm">{c.item?.[0]?.nombre ?? '—'}</p>
+                          <p className="text-white text-sm">{c.item?.nombre ?? '—'}</p>
                           {c.observacion && <p className="text-zinc-500 text-xs mt-0.5">{c.observacion}</p>}
                         </div>
                       </div>
