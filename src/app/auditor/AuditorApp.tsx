@@ -3,6 +3,157 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '@/lib/supabase-client'
 
+// ── Lector QR con cámara ─────────────────────────────────────
+function QRScanner({ onScan, onClose }: { onScan: (token: string) => void; onClose: () => void }) {
+  const videoRef  = useRef<HTMLVideoElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const rafRef    = useRef<number>(0)
+  const [error, setError]   = useState('')
+  const [activo, setActivo] = useState(false)
+
+  useEffect(() => {
+    iniciarCamara()
+    return () => detener()
+  }, [])
+
+  async function iniciarCamara() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+      })
+      streamRef.current = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        videoRef.current.play()
+        setActivo(true)
+        escanear()
+      }
+    } catch (e: any) {
+      setError('No se pudo acceder a la cámara. Verificá los permisos del navegador.')
+    }
+  }
+
+  function detener() {
+    cancelAnimationFrame(rafRef.current)
+    streamRef.current?.getTracks().forEach(t => t.stop())
+  }
+
+  async function escanear() {
+    const video  = videoRef.current
+    const canvas = canvasRef.current
+    if (!video || !canvas || video.readyState < 2) {
+      rafRef.current = requestAnimationFrame(escanear)
+      return
+    }
+    canvas.width  = video.videoWidth
+    canvas.height = video.videoHeight
+    const ctx = canvas.getContext('2d')!
+    ctx.drawImage(video, 0, 0)
+
+    // Intentar BarcodeDetector (Chrome/Android nativo)
+    if ('BarcodeDetector' in window) {
+      try {
+        // @ts-ignore
+        const detector = new BarcodeDetector({ formats: ['qr_code'] })
+        const codes = await detector.detect(canvas)
+        if (codes.length > 0) {
+          detener()
+          onScan(codes[0].rawValue)
+          return
+        }
+      } catch {}
+    } else {
+      // Fallback: jsQR (se carga dinámicamente)
+      try {
+        const jsQR = (window as any).jsQR
+        if (jsQR) {
+          const img = ctx.getImageData(0, 0, canvas.width, canvas.height)
+          const code = jsQR(img.data, img.width, img.height)
+          if (code) {
+            detener()
+            onScan(code.data)
+            return
+          }
+        }
+      } catch {}
+    }
+
+    rafRef.current = requestAnimationFrame(escanear)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black z-50 flex flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 bg-black/80">
+        <p className="text-white text-sm font-medium">Escanear QR del proveedor</p>
+        <button onClick={() => { detener(); onClose() }}
+          className="text-zinc-400 hover:text-white transition-colors p-1">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M18 6 6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+
+      {/* Cámara */}
+      <div className="flex-1 relative flex items-center justify-center bg-black">
+        <video ref={videoRef} className="w-full h-full object-cover" muted playsInline autoPlay/>
+        <canvas ref={canvasRef} className="hidden"/>
+
+        {/* Marco de escaneo */}
+        {activo && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="relative w-64 h-64">
+              {/* Esquinas del marco */}
+              {[
+                'top-0 left-0 border-t-2 border-l-2 rounded-tl-lg',
+                'top-0 right-0 border-t-2 border-r-2 rounded-tr-lg',
+                'bottom-0 left-0 border-b-2 border-l-2 rounded-bl-lg',
+                'bottom-0 right-0 border-b-2 border-r-2 rounded-br-lg',
+              ].map((cls, i) => (
+                <div key={i} className={`absolute w-8 h-8 border-blue-400 ${cls}`}/>
+              ))}
+              {/* Línea de escaneo animada */}
+              <div className="absolute inset-x-0 top-1/2 h-0.5 bg-blue-400/60"
+                style={{ animation: 'scan 2s ease-in-out infinite alternate' }}/>
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div className="absolute inset-0 flex items-center justify-center p-6">
+            <div className="bg-red-500/20 border border-red-500/30 rounded-2xl p-6 text-center">
+              <p className="text-red-300 text-sm">{error}</p>
+              <button onClick={() => { setError(''); iniciarCamara() }}
+                className="mt-3 text-xs text-blue-400 underline">Reintentar</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <p className="text-zinc-500 text-xs text-center py-3 bg-black">
+        Apuntá la cámara al código QR del proveedor
+      </p>
+
+      <style>{`
+        @keyframes scan {
+          from { transform: translateY(-80px); opacity: 0.4; }
+          to   { transform: translateY(80px);  opacity: 1; }
+        }
+      `}</style>
+    </div>
+
+      {/* Scanner overlay */}
+      {scannerAbierto && (
+        <QRScanner
+          onScan={(token) => { setScannerAbierto(false); buscarPorQR(token) }}
+          onClose={() => setScannerAbierto(false)}
+        />
+      )}
+    </div>
+  )
+}
+
 // ── Tipos ────────────────────────────────────────────────────
 type Establecimiento = { id: string; nombre: string; lat_centro: number; lng_centro: number; radio_metros: number }
 type ProveedorSnap   = { id: string; razon_social: string; cuit: string; estado: string; qr_token: string; habilitacion_estado: string; habilitacion_venc: string; docs_vencidos: number; equipos: any[] }
@@ -57,6 +208,7 @@ function saveSnap(estId: string, snap: Snapshot) {
 
 export default function AuditorApp({ establecimientos, auditorId }: { establecimientos: Establecimiento[]; auditorId: string }) {
   const [online, setOnline]                       = useState(true)
+  const [scannerAbierto, setScannerAbierto]       = useState(false)
   const [vista, setVista]                         = useState<'inicio'|'escanear'|'visita'|'cola'>('inicio')
   const [estSeleccionado, setEst]                 = useState<Establecimiento | null>(null)
   const [snapshot, setSnapshot]                   = useState<Snapshot | null>(null)
@@ -81,6 +233,12 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
     window.addEventListener('offline', off)
     setOnline(navigator.onLine)
     setCola(getQueue())
+    // Cargar jsQR como fallback para navegadores sin BarcodeDetector
+    if (!('BarcodeDetector' in window) && !(window as any).jsQR) {
+      const script = document.createElement('script')
+      script.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js'
+      document.head.appendChild(script)
+    }
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
   }, [])
 
@@ -317,22 +475,42 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
             </div>
           </div>
 
-          {/* Input QR manual */}
+          {/* Scanner QR */}
           <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-4 space-y-3">
             <p className="text-zinc-400 text-xs font-medium uppercase tracking-wide">Escanear QR</p>
+            <button
+              onClick={() => setScannerAbierto(true)}
+              className="w-full bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium py-4 rounded-xl transition-colors flex items-center justify-center gap-3">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/>
+                <rect x="7" y="7" width="3" height="3" rx="0.5"/><rect x="14" y="7" width="3" height="3" rx="0.5"/>
+                <rect x="7" y="14" width="3" height="3" rx="0.5"/>
+                <path d="M14 14h1v1m2-1h1v3h-3v-1"/>
+              </svg>
+              Abrir cámara y escanear QR
+            </button>
+
+            {/* Separador */}
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-px bg-white/[0.06]"/>
+              <span className="text-zinc-600 text-xs">o ingresá el token manualmente</span>
+              <div className="flex-1 h-px bg-white/[0.06]"/>
+            </div>
+
             <input
               value={qrInput}
               onChange={e => setQrInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && qrInput && buscarPorQR(qrInput)}
-              placeholder="Ingresá o escaneá el token QR"
+              placeholder="Token QR del proveedor"
               className={inputCls}
             />
-            <button
-              onClick={() => qrInput && buscarPorQR(qrInput)}
-              disabled={!qrInput}
-              className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-sm font-medium py-2.5 rounded-lg transition-colors">
-              Buscar proveedor
-            </button>
+            {qrInput && (
+              <button
+                onClick={() => buscarPorQR(qrInput)}
+                className="w-full bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.1] text-white text-sm py-2 rounded-lg transition-colors">
+                Buscar
+              </button>
+            )}
           </div>
 
           {/* Lista rápida de proveedores del snapshot */}
@@ -522,6 +700,15 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
             </button>
           )}
         </div>
+      )}
+    </div>
+
+      {/* Scanner overlay */}
+      {scannerAbierto && (
+        <QRScanner
+          onScan={(token) => { setScannerAbierto(false); buscarPorQR(token) }}
+          onClose={() => setScannerAbierto(false)}
+        />
       )}
     </div>
   )
