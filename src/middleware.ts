@@ -102,6 +102,7 @@ export async function middleware(request: NextRequest) {
     '/login',
     '/registro',
     '/auth',
+    '/cambiar-password',
     '/proveedor/login',
     '/proveedor/registro',
     '/proveedor/cambiar-password',
@@ -110,21 +111,57 @@ export async function middleware(request: NextRequest) {
   ]
   const esPublica = rutasPublicas.some(r => path.startsWith(r))
 
-  // Dashboard — requiere usuario interno
-  if (path.startsWith('/dashboard') && !user) {
-    return NextResponse.redirect(new URL('/login', request.url))
-  }
-
-  // App auditor — requiere usuario interno
-  if (path.startsWith('/auditor')) {
-    if (!user) return NextResponse.redirect(new URL('/login', request.url))
-    // La verificación de rol se hace en el Server Component
-  }
-
-  // Rutas privadas sin sesión
-  if (!esPublica && !user && !path.startsWith('/dashboard') && !path.startsWith('/auditor')) {
+  // Sin sesión — redirigir al login correspondiente
+  if (!user && !esPublica) {
     if (path.startsWith('/proveedor/portal')) {
       return NextResponse.redirect(new URL('/proveedor/login', request.url))
+    }
+    if (path.startsWith('/acceso')) {
+      return NextResponse.redirect(new URL('/login', request.url))
+    }
+    if (path.startsWith('/dashboard') || path.startsWith('/auditor')) {
+      return NextResponse.redirect(new URL('/login', request.url))
+    }
+  }
+
+  // Con sesión — redirigir por rol desde la raíz o el login
+  if (user && (path === '/' || path === '/login')) {
+    // Obtener el rol del usuario
+    const { data: usuarioData } = await supabase
+      .from('usuarios')
+      .select('rol')
+      .eq('id', user.id)
+      .single()
+
+    const rol = usuarioData?.rol
+
+    if (rol === 'operador_acceso') {
+      // Portero → app de acceso
+      return NextResponse.redirect(new URL('/acceso', request.url))
+    }
+    if (rol === 'auditor') {
+      // Auditor → app de auditoría
+      return NextResponse.redirect(new URL('/auditor', request.url))
+    }
+    if (rol && path === '/login') {
+      // Otros internos → dashboard
+      return NextResponse.redirect(new URL('/dashboard', request.url))
+    }
+  }
+
+  // /acceso — solo operador_acceso y admin (verificación rápida en middleware)
+  if (path.startsWith('/acceso') && user) {
+    const { data: usuarioData } = await supabase
+      .from('usuarios')
+      .select('rol')
+      .eq('id', user.id)
+      .single()
+
+    const rol = usuarioData?.rol
+    if (rol && !['operador_acceso', 'admin'].includes(rol)) {
+      // No es portero ni admin — redirigir a su lugar correcto
+      if (rol === 'auditor') return NextResponse.redirect(new URL('/auditor', request.url))
+      return NextResponse.redirect(new URL('/dashboard', request.url))
     }
   }
 
