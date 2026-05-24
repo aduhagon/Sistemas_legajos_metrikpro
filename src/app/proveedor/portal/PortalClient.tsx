@@ -61,6 +61,7 @@ export default function PortalClient({
   equiposSlot,
 }: Props) {
   const [tab, setTab] = useState<'docs' | 'equipos' | 'historial' | 'personal' | 'accesos' | 'perfil' | 'auditorias'>('docs')
+  const [uploadModal, setUploadModal] = useState<{ docId: string; nombre: string; tipoVigencia: string; fechaActual: string | null } | null>(null)
   const [editandoPerfil, setEditandoPerfil] = useState(false)
   const [saving, setSaving] = useState(false)
   const [perfil, setPerfil] = useState({
@@ -226,52 +227,90 @@ export default function PortalClient({
                 const dr = doc.documentos_requeridos
                 const diasV = doc.fecha_venc ? diasHasta(doc.fecha_venc) : null
                 const estaVencido = diasV !== null && diasV < 0
+                const puedeSubir = doc.estado !== 'APROBADO'
 
                 return (
-                  <div key={doc.id} className="px-5 py-4">
-                    <div className="flex items-start justify-between gap-3 mb-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                          <span className="text-zinc-500 text-xs font-mono">{dr?.codigo}</span>
-                          <span className="text-sm font-medium text-white">{dr?.nombre}</span>
-                          {dr?.obligatorio && <span className="text-red-400 text-xs">*</span>}
-                        </div>
-                        <div className="flex items-center gap-3 flex-wrap">
-                          <span className="text-zinc-600 text-xs">{dr?.tipo_vigencia}</span>
-                          {doc.fecha_venc && (
-                            <span className={`text-xs ${estaVencido ? 'text-orange-400' : 'text-zinc-500'}`}>
-                              Vence: {formatFecha(doc.fecha_venc)}
-                              {estaVencido && ' — vencido'}
-                              {!estaVencido && diasV !== null && diasV <= 30 && ` — en ${diasV} día${diasV !== 1 ? 's' : ''}`}
-                            </span>
-                          )}
-                        </div>
-                        {doc.observaciones && (
-                          <p className="text-orange-400 text-xs italic mt-1">"{doc.observaciones}"</p>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {doc.archivo_url && (
-                          <a href={doc.archivo_url} target="_blank" rel="noopener noreferrer"
-                            className="text-blue-400 hover:text-blue-300 text-xs transition-colors">↗</a>
-                        )}
-                        <span className={`text-xs px-2.5 py-1 rounded-full border ${estadoDocColor[doc.estado] ?? estadoDocColor.PENDIENTE}`}>
-                          {doc.estado === 'EN_REVISION' ? 'En revisión' :
-                           doc.estado.charAt(0) + doc.estado.slice(1).toLowerCase()}
-                        </span>
-                      </div>
+                  <div key={doc.id} className="px-5 py-4 flex items-center gap-3">
+                    {/* Ícono de estado */}
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-sm ${
+                      doc.estado === 'APROBADO'  ? 'bg-green-500/15 text-green-400' :
+                      doc.estado === 'CARGADO'   ? 'bg-blue-500/15 text-blue-400' :
+                      doc.estado === 'RECHAZADO' ? 'bg-red-500/15 text-red-400' :
+                      doc.estado === 'VENCIDO'   ? 'bg-orange-500/15 text-orange-400' :
+                      'bg-zinc-500/15 text-zinc-500'
+                    }`}>
+                      {doc.estado === 'APROBADO'  ? '✓' :
+                       doc.estado === 'CARGADO'   ? '⏳' :
+                       doc.estado === 'RECHAZADO' ? '✗' :
+                       doc.estado === 'VENCIDO'   ? '!' : '○'}
                     </div>
-                    <DocUploadRow
-                      docId={doc.id}
-                      proveedorId={proveedor.id}
-                      tipoVigencia={dr?.tipo_vigencia ?? 'ANUAL'}
-                      estadoActual={doc.estado}
-                      fechaVencActual={doc.fecha_venc}
-                    />
+
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-sm font-medium text-white truncate">{dr?.nombre}</span>
+                        {dr?.obligatorio && <span className="text-red-400 text-xs shrink-0">*</span>}
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                        <span className="text-zinc-600 text-xs">{dr?.codigo} · {dr?.tipo_vigencia}</span>
+                        {doc.fecha_venc && (
+                          <span className={`text-xs ${estaVencido ? 'text-orange-400' : 'text-zinc-500'}`}>
+                            Vence {formatFecha(doc.fecha_venc)}
+                            {estaVencido && ' ⚠'}
+                          </span>
+                        )}
+                      </div>
+                      {doc.observaciones && (
+                        <p className="text-orange-400 text-xs italic mt-0.5">↳ {doc.observaciones}</p>
+                      )}
+                    </div>
+
+                    {/* Acciones */}
+                    <div className="flex items-center gap-2 shrink-0">
+                      {doc.archivo_url && (
+                        <a href={doc.archivo_url} target="_blank" rel="noopener noreferrer"
+                          className="text-zinc-500 hover:text-zinc-300 transition-colors p-1"
+                          title="Ver archivo">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                            <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+                          </svg>
+                        </a>
+                      )}
+                      {puedeSubir && (
+                        <button
+                          onClick={() => setUploadModal({
+                            docId: doc.id,
+                            nombre: dr?.nombre ?? '',
+                            tipoVigencia: dr?.tipo_vigencia ?? 'ANUAL',
+                            fechaActual: doc.fecha_venc,
+                          })}
+                          className="bg-white/[0.07] hover:bg-white/[0.12] border border-white/[0.1] text-zinc-300 text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                          </svg>
+                          {doc.estado === 'RECHAZADO' || doc.estado === 'VENCIDO' ? 'Renovar' : 'Subir'}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )
               })}
             </div>
+
+            {/* ── Modal de upload ── */}
+            {uploadModal && (
+              <UploadModal
+                docId={uploadModal.docId}
+                nombre={uploadModal.nombre}
+                proveedorId={proveedor.id}
+                tipoVigencia={uploadModal.tipoVigencia}
+                fechaActual={uploadModal.fechaActual}
+                onClose={() => setUploadModal(null)}
+              />
+            )}
           </div>
         )}
 
@@ -554,59 +593,59 @@ export default function PortalClient({
   )
 }
 
-// ── DocUploadRow: lógica real — Supabase Storage + RPC registrar_presentacion_documento
-// (mismo patrón que src/app/proveedor/documentos/page.tsx)
-function DocUploadRow({
+// ── UploadModal: modal de carga de documento ────────────────────────────────
+function UploadModal({
   docId,
+  nombre,
   proveedorId,
   tipoVigencia,
-  estadoActual,
-  fechaVencActual,
+  fechaActual,
+  onClose,
 }: {
   docId: string
+  nombre: string
   proveedorId: string
   tipoVigencia: string
-  estadoActual: string
-  fechaVencActual: string | null
+  fechaActual: string | null
+  onClose: () => void
 }) {
   const necesitaFecha = tipoVigencia !== 'PERMANENTE'
-  const [fecha, setFecha] = useState(fechaVencActual ?? '')
+  const [fecha, setFecha] = useState(fechaActual ?? '')
+  const [archivo, setArchivo] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
   const [ok, setOk] = useState(false)
 
   const hoyStr = new Date().toISOString().split('T')[0]
 
-  async function handleUpload(file: File) {
-    if (necesitaFecha && !fecha) {
-      setError('Ingresá la fecha de vencimiento antes de subir')
-      return
-    }
+  async function handleSubmit() {
+    if (!archivo) { setError('Seleccioná un archivo'); return }
+    if (necesitaFecha && !fecha) { setError('Ingresá la fecha de vencimiento'); return }
+
     setUploading(true)
     setError('')
-    setOk(false)
     try {
-      // 1. Subir a Storage
-      const ext = file.name.split('.').pop()
+      // 1. Storage
+      const ext = archivo.name.split('.').pop()
       const path = `${proveedorId}/${docId}.${ext}`
       const { error: uploadError } = await supabase.storage
         .from('documentos')
-        .upload(path, file, { upsert: true })
+        .upload(path, archivo, { upsert: true })
       if (uploadError) throw new Error(uploadError.message)
 
-      // 2. URL firmada (1 año)
+      // 2. URL firmada 1 año
       const { data: urlData } = await supabase.storage
         .from('documentos')
         .createSignedUrl(path, 60 * 60 * 24 * 365)
 
       // 3. Hash SHA-256
-      const buffer = await file.arrayBuffer()
+      const buffer = await archivo.arrayBuffer()
       const hashBuffer = await crypto.subtle.digest('SHA-256', buffer)
       const hash = Array.from(new Uint8Array(hashBuffer))
         .map(b => b.toString(16).padStart(2, '0'))
         .join('')
 
-      // 4. Registrar en BD via RPC
+      // 4. RPC
       const { error: rpcError } = await supabase.rpc('registrar_presentacion_documento', {
         p_doc_id: docId,
         p_archivo_url: urlData?.signedUrl ?? path,
@@ -616,7 +655,7 @@ function DocUploadRow({
       if (rpcError) throw new Error(rpcError.message)
 
       setOk(true)
-      setTimeout(() => window.location.reload(), 800)
+      setTimeout(() => window.location.reload(), 1000)
     } catch (err: any) {
       setError(err.message ?? 'Error al subir el archivo')
     } finally {
@@ -624,35 +663,133 @@ function DocUploadRow({
     }
   }
 
-  // Docs aprobados: no mostrar uploader
-  if (estadoActual === 'APROBADO') return null
-
   return (
-    <div className="mt-2">
-      <div className="flex items-center gap-2 flex-wrap">
-        {necesitaFecha && (
-          <input
-            type="date"
-            value={fecha}
-            min={hoyStr}
-            onChange={e => setFecha(e.target.value)}
-            className="bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500/50 w-36"
-          />
-        )}
-        <label className={`cursor-pointer bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.1] text-zinc-300 text-sm px-4 py-1.5 rounded-lg transition-all ${
-          uploading ? 'opacity-50 pointer-events-none' : ''
-        }`}>
-          {uploading ? 'Subiendo…' : ok ? '✓ Subido' : estadoActual === 'RECHAZADO' ? 'Resubir' : 'Subir archivo'}
-          <input
-            type="file"
-            className="hidden"
-            accept=".pdf,.jpg,.jpeg,.png,.webp"
-            onChange={e => { if (e.target.files?.[0]) handleUpload(e.target.files[0]) }}
-          />
-        </label>
-        {ok && <span className="text-green-400 text-xs">✓ Documento enviado</span>}
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.7)' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div className="bg-[#1a1d27] border border-white/[0.1] rounded-2xl w-full max-w-sm shadow-2xl">
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between">
+          <div>
+            <h3 className="text-white font-medium text-sm">Subir documento</h3>
+            <p className="text-zinc-500 text-xs mt-0.5 truncate max-w-56">{nombre}</p>
+          </div>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors p-1">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M18 6 6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+
+        <div className="px-5 py-4 space-y-4">
+          {ok ? (
+            <div className="text-center py-4">
+              <div className="text-4xl mb-2">✅</div>
+              <p className="text-green-400 font-medium">¡Documento enviado!</p>
+              <p className="text-zinc-500 text-xs mt-1">Recargando…</p>
+            </div>
+          ) : (
+            <>
+              {/* Fecha de vencimiento */}
+              {necesitaFecha && (
+                <div>
+                  <label className="block text-zinc-400 text-xs mb-1.5">
+                    Fecha de vencimiento <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={fecha}
+                    min={hoyStr}
+                    onChange={e => setFecha(e.target.value)}
+                    className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500/50 transition-all"
+                  />
+                </div>
+              )}
+
+              {/* Selector de archivo */}
+              <div>
+                <label className="block text-zinc-400 text-xs mb-1.5">
+                  Archivo <span className="text-red-400">*</span>
+                  <span className="text-zinc-600 ml-1">(PDF, JPG, PNG — máx. 10MB)</span>
+                </label>
+                <label className={`flex items-center gap-3 w-full border-2 border-dashed rounded-xl px-4 py-5 cursor-pointer transition-all ${
+                  archivo
+                    ? 'border-blue-500/40 bg-blue-500/5'
+                    : 'border-white/[0.1] bg-white/[0.03] hover:border-white/[0.2] hover:bg-white/[0.05]'
+                }`}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+                    stroke={archivo ? '#60a5fa' : '#52525b'} strokeWidth="1.5">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                  </svg>
+                  <div className="flex-1 min-w-0">
+                    {archivo ? (
+                      <>
+                        <p className="text-blue-300 text-sm font-medium truncate">{archivo.name}</p>
+                        <p className="text-zinc-500 text-xs">{(archivo.size / 1024).toFixed(0)} KB</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-zinc-400 text-sm">Tocá para seleccionar</p>
+                        <p className="text-zinc-600 text-xs">o arrastrá el archivo acá</p>
+                      </>
+                    )}
+                  </div>
+                  {archivo && (
+                    <button
+                      type="button"
+                      onClick={e => { e.preventDefault(); setArchivo(null) }}
+                      className="text-zinc-500 hover:text-zinc-300 shrink-0"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M18 6 6 18M6 6l12 12"/>
+                      </svg>
+                    </button>
+                  )}
+                  <input
+                    type="file"
+                    className="hidden"
+                    accept=".pdf,.jpg,.jpeg,.png,.webp"
+                    onChange={e => setArchivo(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+              </div>
+
+              {error && (
+                <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                  <p className="text-red-400 text-xs">{error}</p>
+                </div>
+              )}
+
+              {/* Botones */}
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={onClose}
+                  className="flex-1 bg-white/[0.05] hover:bg-white/[0.08] text-zinc-300 text-sm py-2.5 rounded-xl transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleSubmit}
+                  disabled={uploading || !archivo || (necesitaFecha && !fecha)}
+                  className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-medium text-sm py-2.5 rounded-xl transition-all flex items-center justify-center gap-2"
+                >
+                  {uploading ? (
+                    <>
+                      <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                      </svg>
+                      Subiendo…
+                    </>
+                  ) : 'Enviar documento'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
-      {error && <p className="text-red-400 text-xs mt-1">{error}</p>}
     </div>
   )
 }
