@@ -1,11 +1,13 @@
 import { createClient } from '@/lib/supabase-server'
 import { notFound } from 'next/navigation'
 
-export default async function QRValidacionPage({ params }: { params: { token: string } }) {
+export default async function QRValidacionPage({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = await params
+
   const supabase = createClient()
 
   const { data: resultado } = await supabase
-    .rpc('validar_qr', { p_qr_token: params.token })
+    .rpc('validar_qr', { p_qr_token: token })
 
   if (!resultado) notFound()
 
