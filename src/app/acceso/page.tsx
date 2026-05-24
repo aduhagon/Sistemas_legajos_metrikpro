@@ -221,10 +221,7 @@ export default function AccesoOperadorPage() {
             </div>
             <span className="font-medium text-sm">Control de acceso</span>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-zinc-500 text-xs">{horaActual}</span>
-            <a href="/dashboard" className="text-zinc-600 hover:text-zinc-400 text-xs transition-colors">Panel →</a>
-          </div>
+          <span className="text-zinc-500 text-xs">{horaActual}</span>
         </div>
 
         <div className="flex-1 flex flex-col max-w-sm mx-auto w-full px-4 py-5 gap-4">

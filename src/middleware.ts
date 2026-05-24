@@ -3,11 +3,6 @@ import { NextResponse, type NextRequest } from 'next/server'
 
 // ============================================================
 // SEC-005: Rate limiting in-memory por IP
-// Rutas protegidas (solo POST):
-//   /api/registro*   → 10 req / 60s
-//   /api/validar-qr* → 30 req / 60s
-// Nota: in-memory por instancia. Para multi-instancia distribuida
-// migrar a Vercel KV o Upstash Redis.
 // ============================================================
 interface RateLimitEntry { count: number; resetAt: number }
 const rlStore = new Map<string, RateLimitEntry>()
@@ -47,24 +42,23 @@ function checkRateLimit(
 export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname
 
-  // --- SEC-005: Rate limiting (antes del check de sesión) ---
+  // --- SEC-005: Rate limiting ---
   if (request.method === 'POST') {
     const rule = RL_RULES.find(r => r.pattern.test(path))
     if (rule) {
       const ip = getIP(request)
       const key = `rl:${path.split('/')[2]}:${ip}`
       const { allowed, remaining, resetAt } = checkRateLimit(key, rule.limit, rule.windowMs)
-
       if (!allowed) {
         return NextResponse.json(
           { error: 'Demasiadas solicitudes. Intentá de nuevo en un momento.' },
           {
             status: 429,
             headers: {
-              'Retry-After':          String(Math.ceil((resetAt - Date.now()) / 1000)),
-              'X-RateLimit-Limit':    String(rule.limit),
-              'X-RateLimit-Remaining':'0',
-              'X-RateLimit-Reset':    String(Math.ceil(resetAt / 1000)),
+              'Retry-After':           String(Math.ceil((resetAt - Date.now()) / 1000)),
+              'X-RateLimit-Limit':     String(rule.limit),
+              'X-RateLimit-Remaining': '0',
+              'X-RateLimit-Reset':     String(Math.ceil(resetAt / 1000)),
             },
           }
         )
@@ -72,7 +66,7 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // --- Supabase auth (lógica original) ---
+  // --- Supabase auth ---
   let response = NextResponse.next({ request: { headers: request.headers } })
 
   const supabase = createServerClient(
@@ -107,6 +101,7 @@ export async function middleware(request: NextRequest) {
     '/proveedor/registro',
     '/proveedor/cambiar-password',
     '/qr',
+    '/qr-personal',
     '/entrada',
   ]
   const esPublica = rutasPublicas.some(r => path.startsWith(r))
@@ -116,17 +111,11 @@ export async function middleware(request: NextRequest) {
     if (path.startsWith('/proveedor/portal')) {
       return NextResponse.redirect(new URL('/proveedor/login', request.url))
     }
-    if (path.startsWith('/acceso')) {
-      return NextResponse.redirect(new URL('/login', request.url))
-    }
-    if (path.startsWith('/dashboard') || path.startsWith('/auditor')) {
-      return NextResponse.redirect(new URL('/login', request.url))
-    }
+    return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  // Con sesión — redirigir por rol desde la raíz o el login
-  if (user && (path === '/' || path === '/login')) {
-    // Obtener el rol del usuario
+  // Con sesión — obtener rol una sola vez para todas las decisiones
+  if (user) {
     const { data: usuarioData } = await supabase
       .from('usuarios')
       .select('rol')
@@ -135,32 +124,26 @@ export async function middleware(request: NextRequest) {
 
     const rol = usuarioData?.rol
 
-    if (rol === 'operador_acceso') {
-      // Portero → app de acceso
-      return NextResponse.redirect(new URL('/acceso', request.url))
-    }
-    if (rol === 'auditor') {
-      // Auditor → app de auditoría
-      return NextResponse.redirect(new URL('/auditor', request.url))
-    }
-    if (rol && path === '/login') {
-      // Otros internos → dashboard
+    // Desde raíz o login → redirigir según rol
+    if (path === '/' || path === '/login') {
+      if (rol === 'operador_acceso') return NextResponse.redirect(new URL('/acceso', request.url))
+      if (rol === 'auditor')         return NextResponse.redirect(new URL('/auditor', request.url))
       return NextResponse.redirect(new URL('/dashboard', request.url))
     }
-  }
 
-  // /acceso — solo operador_acceso y admin (verificación rápida en middleware)
-  if (path.startsWith('/acceso') && user) {
-    const { data: usuarioData } = await supabase
-      .from('usuarios')
-      .select('rol')
-      .eq('id', user.id)
-      .single()
+    // operador_acceso solo puede estar en /acceso
+    // Si intenta ir a /dashboard, /auditor u otra ruta → volver a /acceso
+    if (rol === 'operador_acceso' && !path.startsWith('/acceso')) {
+      return NextResponse.redirect(new URL('/acceso', request.url))
+    }
 
-    const rol = usuarioData?.rol
-    if (rol && !['operador_acceso', 'admin'].includes(rol)) {
-      // No es portero ni admin — redirigir a su lugar correcto
-      if (rol === 'auditor') return NextResponse.redirect(new URL('/auditor', request.url))
+    // auditor solo puede estar en /auditor
+    if (rol === 'auditor' && !path.startsWith('/auditor')) {
+      return NextResponse.redirect(new URL('/auditor', request.url))
+    }
+
+    // /acceso — solo operador_acceso y admin
+    if (path.startsWith('/acceso') && rol && !['operador_acceso', 'admin'].includes(rol)) {
       return NextResponse.redirect(new URL('/dashboard', request.url))
     }
   }
