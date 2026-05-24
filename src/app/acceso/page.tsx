@@ -1,3 +1,4 @@
+// src/app/acceso/page.tsx
 'use client'
 
 import { useState, useEffect } from 'react'
@@ -13,13 +14,19 @@ type Resultado = {
   detalle?: string
   dentro_perimetro?: boolean | null
   fecha_venc?: string
+  // Personal habilitado
+  tipo?: 'PERSONAL'
+  nombre?: string
+  cuil?: string
+  vigencia_hasta?: string
+  establecimientos?: { id: string; nombre: string }[]
 }
 
 export default function AccesoOperadorPage() {
   const [establecimientos, setEstablecimientos] = useState<any[]>([])
   const [estabSeleccionado, setEstabSeleccionado] = useState('')
   const [qrInput, setQrInput] = useState('')
-  const [qrToken, setQrToken] = useState('')   // token limpio del último QR procesado
+  const [qrToken, setQrToken] = useState('')
   const [resultado, setResultado] = useState<Resultado | null>(null)
   const [loading, setLoading] = useState(false)
   const [tipoAccion, setTipoAccion] = useState<'INGRESO' | 'EGRESO'>('INGRESO')
@@ -39,7 +46,6 @@ export default function AccesoOperadorPage() {
       })
   }, [])
 
-  // Auto-cerrar resultado normal (no excepción) después de 4 segundos
   useEffect(() => {
     if (resultado && !mostrarExcepcion) {
       const t = setTimeout(() => {
@@ -48,7 +54,7 @@ export default function AccesoOperadorPage() {
         setQrToken('')
         setExcepcionOk(null)
         setCamaraActiva(modoEntrada === 'camara')
-      }, 4000)
+      }, 5000)
       return () => clearTimeout(t)
     }
   }, [resultado, mostrarExcepcion, modoEntrada])
@@ -75,26 +81,47 @@ export default function AccesoOperadorPage() {
     setMostrarExcepcion(false)
     setExcepcionOk(null)
 
-    const gps = await obtenerGPS()
-    const token = qr.includes('/qr/') ? qr.split('/qr/').pop()! : qr.trim()
+    const token = qr.includes('/qr/') ? qr.split('/qr/').pop()!
+                : qr.includes('/qr-personal/') ? qr.split('/qr-personal/').pop()!
+                : qr.trim()
     setQrToken(token)
+
+    // ── Paso 1: intentar como personal habilitado ──────────────────────────
+    const { data: resPersonal } = await supabase.rpc('validar_qr_personal', {
+      p_qr_token:           token,
+      p_establecimiento_id: estabSeleccionado,
+    })
+
+    // Si el token pertenece a personal (encontrado en la tabla personal_habilitado)
+    // la función devuelve nombre y cuil — lo usamos para distinguirlo
+    if (resPersonal && (resPersonal.nombre !== undefined)) {
+      setResultado(resPersonal as Resultado)
+      setLoading(false)
+      return
+    }
+
+    // ── Paso 2: tratar como QR de proveedor ───────────────────────────────
+    const gps = await obtenerGPS()
 
     if (tipoAccion === 'INGRESO') {
       const { data } = await supabase.rpc('validar_acceso', {
         p_qr_token_proveedor: token,
         p_establecimiento_id: estabSeleccionado,
-        p_lat: gps?.lat ?? null,
-        p_lng: gps?.lng ?? null,
+        p_lat:  gps?.lat ?? null,
+        p_lng:  gps?.lng ?? null,
       })
       setResultado(data)
     } else {
       const { data } = await supabase.rpc('registrar_egreso', {
         p_qr_token_proveedor: token,
         p_establecimiento_id: estabSeleccionado,
-        p_lat: gps?.lat ?? null,
-        p_lng: gps?.lng ?? null,
+        p_lat:  gps?.lat ?? null,
+        p_lng:  gps?.lng ?? null,
       })
-      setResultado(data?.ok ? { valido: true, razon_social: 'Egreso registrado' } : { valido: false, motivo: data?.error })
+      setResultado(data?.ok
+        ? { valido: true, razon_social: 'Egreso registrado' }
+        : { valido: false, motivo: data?.error }
+      )
     }
     setLoading(false)
   }
@@ -109,14 +136,19 @@ export default function AccesoOperadorPage() {
   }
 
   const motivoLabel: Record<string, string> = {
-    RUBRO_NO_HABILITADO:  'Rubro no habilitado para este establecimiento',
-    HABILITACION_VENCIDA: 'Habilitación vencida',
-    VENCIDA:              'Habilitación vencida',
-    SUSPENDIDA:           'Proveedor suspendido',
-    DOC_PENDIENTE:        'Documentación pendiente',
-    EQUIPOS_VENCIDOS:     'Equipos con documentación vencida',
-    'QR no reconocido':   'QR no reconocido',
+    RUBRO_NO_HABILITADO:              'Rubro no habilitado para este establecimiento',
+    HABILITACION_VENCIDA:             'Habilitación vencida',
+    VENCIDA:                          'Habilitación vencida',
+    SUSPENDIDA:                       'Proveedor suspendido',
+    DOC_PENDIENTE:                    'Documentación pendiente',
+    EQUIPOS_VENCIDOS:                 'Equipos con documentación vencida',
+    PERSONA_INACTIVA:                 'Persona dada de baja',
+    PERMISO_VENCIDO:                  'Permiso de acceso vencido',
+    ESTABLECIMIENTO_NO_HABILITADO:    'No habilitado para este establecimiento',
+    'QR no reconocido':               'QR no reconocido',
   }
+
+  const esPersonal = resultado?.tipo === 'PERSONAL'
 
   return (
     <div className="min-h-screen bg-[#0f1117] text-white flex flex-col">
@@ -191,7 +223,6 @@ export default function AccesoOperadorPage() {
               </button>
             </div>
 
-            {/* Cámara */}
             {modoEntrada === 'camara' && (
               <div className="w-full">
                 <QRScanner activo={camaraActiva} onScan={procesarQR} />
@@ -199,7 +230,6 @@ export default function AccesoOperadorPage() {
               </div>
             )}
 
-            {/* Manual */}
             {modoEntrada === 'manual' && (
               <form onSubmit={e => { e.preventDefault(); procesarQR(qrInput) }} className="w-full space-y-2">
                 <input value={qrInput} onChange={e => setQrInput(e.target.value)}
@@ -214,8 +244,78 @@ export default function AccesoOperadorPage() {
           </>
         )}
 
-        {/* ── RESULTADO ── */}
-        {resultado && !excepcionOk && (
+        {/* ── RESULTADO PERSONAL HABILITADO ── */}
+        {resultado && esPersonal && !excepcionOk && (
+          <div className={`w-full rounded-2xl p-6 text-center border ${
+            resultado.valido
+              ? 'bg-blue-500/5 border-blue-500/30'
+              : 'bg-red-500/5 border-red-500/30'
+          }`}>
+            <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${
+              resultado.valido ? 'bg-blue-500/10' : 'bg-red-500/10'
+            }`}>
+              {resultado.valido ? (
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                  <circle cx="12" cy="7" r="4"/>
+                </svg>
+              ) : (
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              )}
+            </div>
+
+            {/* Badge tipo */}
+            <div className="inline-flex items-center gap-1.5 bg-blue-500/10 border border-blue-500/20 text-blue-300 text-xs px-3 py-1 rounded-full mb-3">
+              🪪 Personal habilitado
+            </div>
+
+            <h2 className={`text-xl font-semibold mb-1 ${resultado.valido ? 'text-blue-300' : 'text-red-400'}`}>
+              {resultado.valido ? 'Acceso habilitado' : 'Acceso denegado'}
+            </h2>
+
+            {/* Nombre grande para verificación visual */}
+            {resultado.nombre && (
+              <p className="text-white font-bold text-2xl mt-2">{resultado.nombre}</p>
+            )}
+            {resultado.cuil && (
+              <p className="text-zinc-400 text-base font-mono mt-1">CUIL {resultado.cuil}</p>
+            )}
+
+            {resultado.valido && resultado.vigencia_hasta && (
+              <p className="text-blue-400/70 text-xs mt-2">
+                Permiso vigente hasta{' '}
+                {new Date(resultado.vigencia_hasta + 'T12:00:00').toLocaleDateString('es-AR')}
+              </p>
+            )}
+
+            {!resultado.valido && resultado.motivo && (
+              <div className="mt-3 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2">
+                <p className="text-red-300 text-sm font-medium">
+                  {motivoLabel[resultado.motivo] ?? resultado.motivo}
+                </p>
+                {resultado.motivo === 'PERMISO_VENCIDO' && resultado.vigencia_hasta && (
+                  <p className="text-red-400/70 text-xs mt-1">
+                    Venció el {new Date(resultado.vigencia_hasta + 'T12:00:00').toLocaleDateString('es-AR')}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {resultado.valido && (
+              <p className="text-zinc-700 text-xs mt-4">Se cierra en 5 segundos...</p>
+            )}
+            {!resultado.valido && (
+              <button onClick={resetear} className="mt-3 text-zinc-600 hover:text-zinc-400 text-xs transition-colors">
+                Escanear otro QR
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* ── RESULTADO PROVEEDOR ── */}
+        {resultado && !esPersonal && !excepcionOk && (
           <div className={`w-full rounded-2xl p-6 text-center border ${
             resultado.valido ? 'bg-green-500/5 border-green-500/30' : 'bg-red-500/5 border-red-500/30'
           }`}>
@@ -259,7 +359,7 @@ export default function AccesoOperadorPage() {
               </div>
             )}
 
-            {/* ── FUNC-001: Botón de excepción — solo en acceso denegado de INGRESO ── */}
+            {/* Botón excepción — solo proveedores denegados en ingreso */}
             {!resultado.valido && tipoAccion === 'INGRESO' && (
               <button
                 onClick={() => setMostrarExcepcion(true)}
@@ -274,20 +374,17 @@ export default function AccesoOperadorPage() {
             )}
 
             {resultado.valido && (
-              <p className="text-zinc-700 text-xs mt-4">Se cierra en 4 segundos...</p>
+              <p className="text-zinc-700 text-xs mt-4">Se cierra en 5 segundos...</p>
             )}
-
-            {/* Botón cerrar manual para acceso denegado */}
             {!resultado.valido && (
-              <button onClick={resetear}
-                className="mt-3 text-zinc-600 hover:text-zinc-400 text-xs transition-colors">
+              <button onClick={resetear} className="mt-3 text-zinc-600 hover:text-zinc-400 text-xs transition-colors">
                 Escanear otro QR
               </button>
             )}
           </div>
         )}
 
-        {/* ── CONFIRMACIÓN DE EXCEPCIÓN ── */}
+        {/* ── CONFIRMACIÓN EXCEPCIÓN ── */}
         {excepcionOk && (
           <div className="w-full rounded-2xl p-6 text-center border bg-amber-500/5 border-amber-500/30">
             <div className="w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center mx-auto mb-4">
@@ -297,7 +394,9 @@ export default function AccesoOperadorPage() {
             </div>
             <h2 className="text-xl font-semibold text-amber-300 mb-1">Ingreso de excepción registrado</h2>
             <p className="text-white font-medium">{excepcionOk.razon_social}</p>
-            <p className="text-zinc-400 text-sm mt-1">Autorizado por: <span className="text-amber-300">{excepcionOk.autorizado_por}</span></p>
+            <p className="text-zinc-400 text-sm mt-1">
+              Autorizado por: <span className="text-amber-300">{excepcionOk.autorizado_por}</span>
+            </p>
             <p className="text-zinc-600 text-xs mt-3">El supervisor fue notificado</p>
             <button onClick={resetear} className="mt-4 text-zinc-500 hover:text-zinc-300 text-xs transition-colors">
               Escanear otro QR
@@ -307,7 +406,7 @@ export default function AccesoOperadorPage() {
 
       </div>
 
-      {/* ── MODAL DE EXCEPCIÓN — FUNC-001 ── */}
+      {/* Modal excepción */}
       {mostrarExcepcion && resultado && (
         <ExcepcionAcceso
           qrToken={qrToken}
