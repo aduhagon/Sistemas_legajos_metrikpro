@@ -221,7 +221,22 @@ export default function AccesoOperadorPage() {
             </div>
             <span className="font-medium text-sm">Control de acceso</span>
           </div>
-          <span className="text-zinc-500 text-xs">{horaActual}</span>
+          <div className="flex items-center gap-3">
+            <span className="text-zinc-500 text-xs">{horaActual}</span>
+            <button
+              onClick={async () => {
+                await supabase.auth.signOut()
+                window.location.href = '/login'
+              }}
+              className="text-zinc-600 hover:text-zinc-400 text-xs transition-colors flex items-center gap-1"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+              </svg>
+              Salir
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 flex flex-col max-w-sm mx-auto w-full px-4 py-5 gap-4">

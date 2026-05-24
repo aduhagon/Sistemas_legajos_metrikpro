@@ -47,7 +47,7 @@ const ROL_COLOR: Record<string, string> = {
 const ROLES = ['admin', 'evaluador', 'operario', 'operador_acceso', 'auditor']
 
 // Roles que pueden tener scope de establecimientos
-const ROLES_CON_SCOPE = ['evaluador', 'auditor']
+const ROLES_CON_SCOPE = ['evaluador', 'auditor', 'operario', 'operador_acceso']
 
 const emptyForm = { nombre: '', email: '', rol: 'evaluador', supervisor_scope: 'todos' as 'todos' | 'asignados' }
 
