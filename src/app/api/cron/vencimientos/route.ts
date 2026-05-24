@@ -13,15 +13,16 @@ export async function GET(req: Request) {
   const hoy = new Date()
   const en7dias = new Date(hoy)
   en7dias.setDate(hoy.getDate() + 7)
-  const hoyStr = hoy.toISOString().split('T')[0]
+  const hoyStr     = hoy.toISOString().split('T')[0]
   const en7diasStr = en7dias.toISOString().split('T')[0]
 
   const resultados = {
-    vencidos: 0, porVencer: 0, emailsEnviados: 0, errores: [] as string[],
-    equipos: { vencidos: 0, porVencer: 0 }
+    vencidos: 0, provs_en_revision: 0, habs_doc_pendiente: 0,
+    porVencer: 0, emailsEnviados: 0, errores: [] as string[],
+    equipos: { vencidos: 0, porVencer: 0 },
   }
 
-  // Config SMTP
+  // ── Config SMTP ──────────────────────────────────────────────
   const grupoId = await getGrupoId()
   const { data: config } = await supabase
     .from('grupos_config')
@@ -42,31 +43,32 @@ export async function GET(req: Request) {
 
   const from = `"${config?.smtp_from_name || 'Sistema Legajos'}" <${config?.smtp_from_email || config?.smtp_user}>`
 
-  // ─── 1. VENCIMIENTOS DE DOCUMENTOS DEL LEGAJO ───────────────
-  const { data: docsVencidos } = await supabase
-    .from('documentos_legajo')
-    .select(`id, fecha_venc, documentos_requeridos(nombre), proveedores(id, razon_social, email, notif_vencimientos)`)
-    .lt('fecha_venc', hoyStr)
-    .in('estado', ['CARGADO', 'APROBADO'])
+  // ── 1. VENCIMIENTOS — BATCH (ESC-001) ───────────────────────
+  // Reemplaza el loop N+1 anterior por 3 UPDATEs en una sola función SQL.
+  // Con 4.000 proveedores pasa de ~24.000 queries a 3 — sin riesgo de timeout.
+  const { data: batchResult } = await supabase
+    .rpc('fn_procesar_vencimientos_legajo')
 
-  if (docsVencidos?.length) {
-    for (const doc of docsVencidos) {
-      const prov = doc.proveedores as any
-      await supabase.from('documentos_legajo')
-        .update({ estado: 'VENCIDO', updated_at: new Date().toISOString() }).eq('id', doc.id)
-      await supabase.from('habilitaciones')
-        .update({ estado: 'DOC_PENDIENTE', updated_at: new Date().toISOString() })
-        .eq('proveedor_id', prov?.id).eq('estado', 'VIGENTE')
-      await supabase.from('proveedores')
-        .update({ estado: 'EN_REVISION', updated_at: new Date().toISOString() })
-        .eq('id', prov?.id).eq('estado', 'APROBADO')
-      resultados.vencidos++
-    }
+  if (batchResult) {
+    resultados.vencidos           = batchResult.docs_vencidos      ?? 0
+    resultados.provs_en_revision  = batchResult.provs_en_revision  ?? 0
+    resultados.habs_doc_pendiente = batchResult.habs_doc_pendiente ?? 0
+  }
 
-    if (smtpOk && config?.notif_evaluador_email) {
+  // ── 2. EMAIL al evaluador si hay docs vencidos ───────────────
+  if (smtpOk && config?.notif_evaluador_email && resultados.vencidos > 0) {
+    // Traer los docs recién vencidos para el email (solo lectura)
+    const { data: docsVencidos } = await supabase
+      .from('documentos_legajo')
+      .select('id, fecha_venc, documentos_requeridos(nombre), proveedores(id, razon_social, email, notif_vencimientos)')
+      .eq('estado', 'VENCIDO')
+      .gte('updated_at', hoyStr)  // solo los procesados hoy
+      .order('fecha_venc')
+
+    if (docsVencidos?.length) {
       try {
         const lista = docsVencidos.map((d: any) =>
-          `<li><strong>${d.proveedores?.razon_social}</strong> — ${d.documentos_requeridos?.nombre} (venció el ${new Date(d.fecha_venc).toLocaleDateString('es-AR')})</li>`
+          `<li><strong>${d.proveedores?.razon_social}</strong> — ${d.documentos_requeridos?.nombre} (venció el ${new Date(d.fecha_venc + 'T12:00:00').toLocaleDateString('es-AR')})</li>`
         ).join('')
         await crearTransporter().sendMail({
           from, to: config.notif_evaluador_email,
@@ -78,46 +80,52 @@ export async function GET(req: Request) {
         })
         resultados.emailsEnviados++
       } catch (e: any) { resultados.errores.push(`Email vencidos evaluador: ${e.message}`) }
-    }
 
-    if (smtpOk) {
-      const provsNotif = Array.from(new Map(
-        docsVencidos.filter((d: any) => d.proveedores?.notif_vencimientos)
-          .map((d: any) => [d.proveedores.id, d.proveedores])
-      ).values())
-      for (const prov of provsNotif as any[]) {
-        const docsDelProv = docsVencidos.filter((d: any) => d.proveedores?.id === prov.id)
-        const lista = docsDelProv.map((d: any) =>
-          `<li>${(d.documentos_requeridos as any)?.nombre} (venció el ${new Date(d.fecha_venc).toLocaleDateString('es-AR')})</li>`
-        ).join('')
-        try {
-          await crearTransporter().sendMail({
-            from, to: prov.email,
-            subject: `URGENTE: Documentación vencida — ${prov.razon_social}`,
-            html: `<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px">
-              <h2 style="color:#991b1b">Documentación vencida</h2>
-              <ul style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:16px 16px 16px 32px;color:#7f1d1d">${lista}</ul>
-              <p style="color:#666">Actualizá tu documentación en el portal para recuperar el acceso.</p>
-            </div>`,
-          })
-          resultados.emailsEnviados++
-        } catch (e: any) { resultados.errores.push(`Email vencido proveedor ${prov.email}: ${e.message}`) }
+      // Emails a proveedores con notif activada
+      if (smtpOk) {
+        const provsNotif = Array.from(new Map(
+          docsVencidos
+            .filter((d: any) => d.proveedores?.notif_vencimientos)
+            .map((d: any) => [d.proveedores.id, d.proveedores])
+        ).values())
+
+        for (const prov of provsNotif as any[]) {
+          const docsDelProv = docsVencidos.filter((d: any) => d.proveedores?.id === prov.id)
+          const lista = docsDelProv.map((d: any) =>
+            `<li>${(d.documentos_requeridos as any)?.nombre} (venció el ${new Date(d.fecha_venc + 'T12:00:00').toLocaleDateString('es-AR')})</li>`
+          ).join('')
+          try {
+            await crearTransporter().sendMail({
+              from, to: prov.email,
+              subject: `URGENTE: Documentación vencida — ${prov.razon_social}`,
+              html: `<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px">
+                <h2 style="color:#991b1b">Documentación vencida</h2>
+                <ul style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:16px 16px 16px 32px;color:#7f1d1d">${lista}</ul>
+                <p style="color:#666">Actualizá tu documentación en el portal para recuperar el acceso.</p>
+              </div>`,
+            })
+            resultados.emailsEnviados++
+          } catch (e: any) { resultados.errores.push(`Email vencido proveedor ${prov.email}: ${e.message}`) }
+        }
       }
     }
   }
 
-  // ─── 2. DOCUMENTOS POR VENCER (LEGAJO) ──────────────────────
+  // ── 3. DOCS POR VENCER (notificación preventiva) ─────────────
   const { data: docsPorVencer } = await supabase
     .from('documentos_legajo')
-    .select(`id, fecha_venc, documentos_requeridos(nombre), proveedores(id, razon_social, email, notif_vencimientos)`)
-    .gte('fecha_venc', hoyStr).lte('fecha_venc', en7diasStr)
+    .select('id, fecha_venc, documentos_requeridos(nombre), proveedores(id, razon_social, email, notif_vencimientos)')
+    .gte('fecha_venc', hoyStr)
+    .lte('fecha_venc', en7diasStr)
     .in('estado', ['CARGADO', 'APROBADO'])
 
   if (docsPorVencer?.length) {
+    resultados.porVencer = docsPorVencer.length
+
     if (smtpOk && config?.notif_evaluador_email) {
       try {
         const lista = docsPorVencer.map((d: any) => {
-          const dias = Math.ceil((new Date(d.fecha_venc).getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24))
+          const dias = Math.ceil((new Date(d.fecha_venc + 'T12:00:00').getTime() - hoy.getTime()) / 86400000)
           return `<li><strong>${(d.proveedores as any)?.razon_social}</strong> — ${(d.documentos_requeridos as any)?.nombre} <span style="color:#d97706">(en ${dias} día${dias !== 1 ? 's' : ''})</span></li>`
         }).join('')
         await crearTransporter().sendMail({
@@ -134,13 +142,15 @@ export async function GET(req: Request) {
 
     if (smtpOk) {
       const provsNotif = Array.from(new Map(
-        docsPorVencer.filter((d: any) => (d.proveedores as any)?.notif_vencimientos)
+        docsPorVencer
+          .filter((d: any) => (d.proveedores as any)?.notif_vencimientos)
           .map((d: any) => [(d.proveedores as any).id, d.proveedores])
       ).values())
+
       for (const prov of provsNotif as any[]) {
         const docsDelProv = docsPorVencer.filter((d: any) => (d.proveedores as any)?.id === prov.id)
         const lista = docsDelProv.map((d: any) => {
-          const dias = Math.ceil((new Date(d.fecha_venc).getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24))
+          const dias = Math.ceil((new Date(d.fecha_venc + 'T12:00:00').getTime() - hoy.getTime()) / 86400000)
           return `<li>${(d.documentos_requeridos as any)?.nombre} — vence en ${dias} día${dias !== 1 ? 's' : ''}</li>`
         }).join('')
         try {
@@ -157,17 +167,15 @@ export async function GET(req: Request) {
         } catch (e: any) { resultados.errores.push(`Email por vencer proveedor ${(prov as any).email}: ${e.message}`) }
       }
     }
-    resultados.porVencer = docsPorVencer.length
   }
 
-  // ─── 3. VENCIMIENTOS DE DOCUMENTOS DE EQUIPOS ───────────────
+  // ── 4. VENCIMIENTOS DE EQUIPOS ───────────────────────────────
   const { data: equiposResult } = await supabase.rpc('fn_procesar_vencimientos_equipos')
   if (equiposResult) {
-    resultados.equipos.vencidos = equiposResult.vencidos ?? 0
+    resultados.equipos.vencidos  = equiposResult.vencidos   ?? 0
     resultados.equipos.porVencer = equiposResult.por_vencer ?? 0
   }
 
-  // Notificar al evaluador si hay docs de equipos vencidos
   if (smtpOk && config?.notif_evaluador_email && (resultados.equipos.vencidos > 0 || resultados.equipos.porVencer > 0)) {
     try {
       const { data: docsEquipoAlert } = await supabase
@@ -181,7 +189,7 @@ export async function GET(req: Request) {
         .in('estado', ['VENCIDO', 'CARGADO', 'APROBADO'])
 
       if (docsEquipoAlert?.length) {
-        const vencidos = docsEquipoAlert.filter((d: any) => d.estado === 'VENCIDO')
+        const vencidos  = docsEquipoAlert.filter((d: any) => d.estado === 'VENCIDO')
         const porVencer = docsEquipoAlert.filter((d: any) => d.estado !== 'VENCIDO')
 
         let html = `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:32px">`
@@ -199,7 +207,7 @@ export async function GET(req: Request) {
         if (porVencer.length > 0) {
           const lista = porVencer.map((d: any) => {
             const equipo = d.equipos_contratista as any
-            const dias = Math.ceil((new Date(d.fecha_venc).getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24))
+            const dias = Math.ceil((new Date(d.fecha_venc + 'T12:00:00').getTime() - hoy.getTime()) / 86400000)
             return `<li><strong>${equipo?.proveedores?.razon_social}</strong> · ${equipo?.dominio} — ${(d.documentos_requeridos_equipo as any)?.nombre} <span style="color:#d97706">(en ${dias} día${dias !== 1 ? 's' : ''})</span></li>`
           }).join('')
           html += `<h3 style="color:#92400e">⚠️ Por vencer en 7 días (${porVencer.length})</h3>
@@ -218,8 +226,9 @@ export async function GET(req: Request) {
     } catch (e: any) { resultados.errores.push(`Email equipos: ${e.message}`) }
   }
 
-  // ─── 4. LIMPIAR registros_pendientes expirados ───────────────
+  // ── 5. LIMPIEZA ──────────────────────────────────────────────
   await supabase.rpc('fn_limpiar_registros_pendientes')
+  await supabase.rpc('fn_limpiar_auditor_snapshots')
 
   // Log auditoría
   await supabase.rpc('log_auditoria', {
