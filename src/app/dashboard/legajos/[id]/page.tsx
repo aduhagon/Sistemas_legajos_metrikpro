@@ -15,14 +15,17 @@ export default async function LegajoDetallePage({
   params,
   searchParams,
 }: {
-  params: { id: string }
-  searchParams: { tab?: string }
+  params: Promise<{ id: string }>
+  searchParams: Promise<{ tab?: string }>
 }) {
+  const { id } = await params
+  const { tab } = await searchParams
+
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const tabActivo = (searchParams.tab as Tab) ?? 'documentos'
+  const tabActivo = (tab as Tab) ?? 'documentos'
 
   const { data: proveedor } = await supabase
     .from('proveedores')
@@ -35,7 +38,7 @@ export default async function LegajoDetallePage({
         documentos_requeridos(codigo, nombre, tipo_vigencia, obligatorio)
       )
     `)
-    .eq('id', params.id)
+    .eq('id', id)
     .maybeSingle()
 
   if (!proveedor) redirect('/dashboard/legajos')
@@ -64,7 +67,7 @@ export default async function LegajoDetallePage({
         documentos_requeridos_equipo(nombre, tipo_vigencia, obligatorio)
       )
     `)
-    .eq('proveedor_id', params.id)
+    .eq('proveedor_id', id)
     .order('created_at', { ascending: false })
 
   // Visitas de auditoría
@@ -79,14 +82,14 @@ export default async function LegajoDetallePage({
         item:checklist_id ( nombre )
       )
     `)
-    .eq('proveedor_id', params.id)
+    .eq('proveedor_id', id)
     .order('visitado_at', { ascending: false })
 
   // Habilitación (para Ver QR)
   const { data: habilitacion } = await supabase
     .from('habilitaciones')
     .select('qr_token, estado')
-    .eq('proveedor_id', params.id)
+    .eq('proveedor_id', id)
     .eq('estado', 'VIGENTE')
     .maybeSingle()
 
