@@ -261,7 +261,13 @@ export default function PortalClient({
                         </span>
                       </div>
                     </div>
-                    <DocUploadRow docId={doc.id} tipoVigencia={dr?.tipo_vigencia ?? 'ANUAL'} />
+                    <DocUploadRow
+                      docId={doc.id}
+                      proveedorId={proveedor.id}
+                      tipoVigencia={dr?.tipo_vigencia ?? 'ANUAL'}
+                      estadoActual={doc.estado}
+                      fechaVencActual={doc.fecha_venc}
+                    />
                   </div>
                 )
               })}
@@ -548,48 +554,105 @@ export default function PortalClient({
   )
 }
 
-// ── DocUploadRow: mantiene la lógica de upload existente ────────────────────
-function DocUploadRow({ docId, tipoVigencia }: { docId: string; tipoVigencia: string }) {
-  const [fecha, setFecha] = useState('')
+// ── DocUploadRow: lógica real — Supabase Storage + RPC registrar_presentacion_documento
+// (mismo patrón que src/app/proveedor/documentos/page.tsx)
+function DocUploadRow({
+  docId,
+  proveedorId,
+  tipoVigencia,
+  estadoActual,
+  fechaVencActual,
+}: {
+  docId: string
+  proveedorId: string
+  tipoVigencia: string
+  estadoActual: string
+  fechaVencActual: string | null
+}) {
+  const necesitaFecha = tipoVigencia !== 'PERMANENTE'
+  const [fecha, setFecha] = useState(fechaVencActual ?? '')
   const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState('')
+  const [ok, setOk] = useState(false)
 
   const hoyStr = new Date().toISOString().split('T')[0]
 
   async function handleUpload(file: File) {
-    if (!fecha) { alert('Ingresá la fecha de vencimiento antes de subir'); return }
+    if (necesitaFecha && !fecha) {
+      setError('Ingresá la fecha de vencimiento antes de subir')
+      return
+    }
     setUploading(true)
+    setError('')
+    setOk(false)
     try {
-      const form = new FormData()
-      form.append('file', file)
-      form.append('doc_id', docId)
-      form.append('fecha_venc', fecha)
-      await fetch('/api/proveedor/upload', { method: 'POST', body: form })
-      window.location.reload()
+      // 1. Subir a Storage
+      const ext = file.name.split('.').pop()
+      const path = `${proveedorId}/${docId}.${ext}`
+      const { error: uploadError } = await supabase.storage
+        .from('documentos')
+        .upload(path, file, { upsert: true })
+      if (uploadError) throw new Error(uploadError.message)
+
+      // 2. URL firmada (1 año)
+      const { data: urlData } = await supabase.storage
+        .from('documentos')
+        .createSignedUrl(path, 60 * 60 * 24 * 365)
+
+      // 3. Hash SHA-256
+      const buffer = await file.arrayBuffer()
+      const hashBuffer = await crypto.subtle.digest('SHA-256', buffer)
+      const hash = Array.from(new Uint8Array(hashBuffer))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('')
+
+      // 4. Registrar en BD via RPC
+      const { error: rpcError } = await supabase.rpc('registrar_presentacion_documento', {
+        p_doc_id: docId,
+        p_archivo_url: urlData?.signedUrl ?? path,
+        p_hash_sha256: hash,
+        p_fecha_venc: necesitaFecha ? fecha : null,
+      })
+      if (rpcError) throw new Error(rpcError.message)
+
+      setOk(true)
+      setTimeout(() => window.location.reload(), 800)
+    } catch (err: any) {
+      setError(err.message ?? 'Error al subir el archivo')
     } finally {
       setUploading(false)
     }
   }
 
+  // Docs aprobados: no mostrar uploader
+  if (estadoActual === 'APROBADO') return null
+
   return (
-    <div className="flex items-center gap-2 mt-2 flex-wrap">
-      <input
-        type="date"
-        value={fecha}
-        min={hoyStr}
-        onChange={e => setFecha(e.target.value)}
-        className="bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500/50 w-36"
-      />
-      <label className={`cursor-pointer bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.1] text-zinc-300 text-sm px-4 py-1.5 rounded-lg transition-all ${
-        uploading ? 'opacity-50 pointer-events-none' : ''
-      }`}>
-        {uploading ? 'Subiendo…' : 'Subir archivo'}
-        <input
-          type="file"
-          className="hidden"
-          accept=".pdf,.jpg,.jpeg,.png"
-          onChange={e => { if (e.target.files?.[0]) handleUpload(e.target.files[0]) }}
-        />
-      </label>
+    <div className="mt-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        {necesitaFecha && (
+          <input
+            type="date"
+            value={fecha}
+            min={hoyStr}
+            onChange={e => setFecha(e.target.value)}
+            className="bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500/50 w-36"
+          />
+        )}
+        <label className={`cursor-pointer bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.1] text-zinc-300 text-sm px-4 py-1.5 rounded-lg transition-all ${
+          uploading ? 'opacity-50 pointer-events-none' : ''
+        }`}>
+          {uploading ? 'Subiendo…' : ok ? '✓ Subido' : estadoActual === 'RECHAZADO' ? 'Resubir' : 'Subir archivo'}
+          <input
+            type="file"
+            className="hidden"
+            accept=".pdf,.jpg,.jpeg,.png,.webp"
+            onChange={e => { if (e.target.files?.[0]) handleUpload(e.target.files[0]) }}
+          />
+        </label>
+        {ok && <span className="text-green-400 text-xs">✓ Documento enviado</span>}
+      </div>
+      {error && <p className="text-red-400 text-xs mt-1">{error}</p>}
     </div>
   )
 }
