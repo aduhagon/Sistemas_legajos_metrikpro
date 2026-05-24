@@ -100,7 +100,6 @@ export default function PortalClient({
         })
         .eq('id', proveedor.id)
       setEditandoPerfil(false)
-      // Refrescar para que los datos del server se actualicen
       window.location.reload()
     } finally {
       setSaving(false)
@@ -142,20 +141,18 @@ export default function PortalClient({
 
       <div className="max-w-2xl mx-auto px-4 py-6">
 
-        {/* ── Card de estado — PP-01 badge + PP-02 banners ── */}
+        {/* ── Card de estado ── */}
         <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5 mb-5">
           <div className="flex items-start justify-between mb-3">
             <div>
               <h1 className="font-semibold text-lg leading-tight">{proveedor.razon_social}</h1>
               <p className="text-zinc-500 text-sm mt-0.5">CUIT {proveedor.cuit}</p>
             </div>
-            {/* PP-01: badge con label humano en lugar de valor técnico crudo */}
             <span className={`text-xs px-2.5 py-1 rounded-full border font-medium shrink-0 ml-3 ${estadoBadgeClass(estadoColor)}`}>
               {estadoLabel}
             </span>
           </div>
 
-          {/* Barra de progreso documentación */}
           <div className="flex items-center justify-between mb-1">
             <span className="text-zinc-500 text-xs">Documentación</span>
             <span className="text-zinc-400 text-xs">{docsAprobados}/{docsTotales}</span>
@@ -169,7 +166,6 @@ export default function PortalClient({
             />
           </div>
 
-          {/* PP-02: banner contextual según estado */}
           {proveedor.estado === 'EN_REVISION' && (
             <div className="mt-4 bg-blue-500/5 border border-blue-500/20 rounded-xl px-4 py-3">
               <p className="text-blue-300 text-sm font-medium mb-0.5">📋 Tu legajo está en revisión</p>
@@ -198,21 +194,29 @@ export default function PortalClient({
           )}
         </div>
 
-        {/* ── Tabs ── */}
-        <div className="flex gap-1 mb-5 bg-white/[0.03] border border-white/[0.06] rounded-xl p-1 overflow-x-auto">
-          {tabs.map(t => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key as typeof tab)}
-              className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-                tab === t.key ? 'bg-white/[0.08] text-white' : 'text-zinc-500 hover:text-zinc-300'
-              }`}
-            >
-              <span className="hidden sm:inline">{t.icon}</span>
-              {t.label}
-              {t.badge && <span className="text-orange-400 text-xs ml-0.5">{t.badge}</span>}
-            </button>
-          ))}
+        {/* ── Tabs — FIX: scroll horizontal sin scrollbar visible ── */}
+        <div className="mb-5">
+          <div
+            className="flex gap-1 bg-white/[0.03] border border-white/[0.06] rounded-xl p-1 overflow-x-auto"
+            style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+          >
+            <style>{`
+              .portal-tabs-container::-webkit-scrollbar { display: none; }
+            `}</style>
+            {tabs.map(t => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key as typeof tab)}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap shrink-0 ${
+                  tab === t.key ? 'bg-white/[0.08] text-white' : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                {t.icon}
+                {t.label}
+                {t.badge && <span className="text-orange-400 text-xs ml-0.5">{t.badge}</span>}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* ── TAB: DOCS ── */}
@@ -314,7 +318,7 @@ export default function PortalClient({
           </div>
         )}
 
-        {/* ── TAB: EQUIPOS — renderizado por el slot del server ── */}
+        {/* ── TAB: EQUIPOS ── */}
         {tab === 'equipos' && (
           <div>{equiposSlot}</div>
         )}
@@ -456,7 +460,7 @@ export default function PortalClient({
           </div>
         )}
 
-        {/* ── TAB: PERFIL — PP-07 edición ── */}
+        {/* ── TAB: PERFIL ── */}
         {tab === 'perfil' && (
           <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
             <div className="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between">
@@ -494,7 +498,6 @@ export default function PortalClient({
               )}
             </div>
             <div className="divide-y divide-white/[0.04]">
-              {/* Campos readonly */}
               {([
                 { label: 'Razón social', value: proveedor.razon_social },
                 { label: 'CUIT',         value: proveedor.cuit },
@@ -506,7 +509,6 @@ export default function PortalClient({
                 </div>
               ))}
 
-              {/* Email — editable */}
               <div className="px-5 py-3 flex items-center justify-between gap-4">
                 <span className="text-zinc-500 text-sm w-32 shrink-0">Email</span>
                 {editandoPerfil ? (
@@ -521,7 +523,6 @@ export default function PortalClient({
                 )}
               </div>
 
-              {/* Teléfono — editable */}
               <div className="px-5 py-3 flex items-center justify-between gap-4">
                 <span className="text-zinc-500 text-sm w-32 shrink-0">Teléfono</span>
                 {editandoPerfil ? (
@@ -593,7 +594,7 @@ export default function PortalClient({
   )
 }
 
-// ── UploadModal: modal de carga de documento ────────────────────────────────
+// ── UploadModal ──────────────────────────────────────────────────────────────
 function UploadModal({
   docId,
   nombre,
@@ -625,7 +626,6 @@ function UploadModal({
     setUploading(true)
     setError('')
     try {
-      // DT-002: upload + hash SHA-256 delegados al servidor
       const form = new FormData()
       form.append('file', archivo)
       form.append('doc_id', docId)
@@ -652,7 +652,6 @@ function UploadModal({
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
       <div className="bg-[#1a1d27] border border-white/[0.1] rounded-2xl w-full max-w-sm shadow-2xl">
-        {/* Header */}
         <div className="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between">
           <div>
             <h3 className="text-white font-medium text-sm">Subir documento</h3>
@@ -674,7 +673,6 @@ function UploadModal({
             </div>
           ) : (
             <>
-              {/* Fecha de vencimiento */}
               {necesitaFecha && (
                 <div>
                   <label className="block text-zinc-400 text-xs mb-1.5">
@@ -690,7 +688,6 @@ function UploadModal({
                 </div>
               )}
 
-              {/* Selector de archivo */}
               <div>
                 <label className="block text-zinc-400 text-xs mb-1.5">
                   Archivo <span className="text-red-400">*</span>
@@ -745,7 +742,6 @@ function UploadModal({
                 </div>
               )}
 
-              {/* Botones */}
               <div className="flex gap-2 pt-1">
                 <button
                   onClick={onClose}
