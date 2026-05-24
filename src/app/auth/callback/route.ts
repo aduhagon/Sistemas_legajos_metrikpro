@@ -1,43 +1,33 @@
-import { createServerClient } from '@supabase/ssr'
+// src/app/auth/callback/route.ts
+// Maneja el callback de Supabase Auth para:
+//   - recovery (reset de contraseña)
+//   - email confirmation
+//   - magic link
+
 import { NextResponse } from 'next/server'
-import type { NextRequest } from 'next/server'
-import { cookies } from 'next/headers'
+import { createClient } from '@/lib/supabase-server'
 
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
-  const code = searchParams.get('code')
-  const next = searchParams.get('next') ?? '/dashboard'
-  const type = searchParams.get('type') // 'recovery' para reset de contraseña
+  const code  = searchParams.get('code')
+  const type  = searchParams.get('type')   // 'recovery' | 'signup' | etc
+  const next  = searchParams.get('next') ?? '/'
 
-  if (!code) {
-    return NextResponse.redirect(`${origin}/login?error=link_invalido`)
-  }
+  if (code) {
+    const supabase = createClient()
+    const { error } = await supabase.auth.exchangeCodeForSession(code)
 
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll(cookiesToSet: { name: string; value: string; options?: any }[]) {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options))
-        },
-      },
+    if (!error) {
+      // Según el tipo, redirigir a la pantalla correcta
+      if (type === 'recovery') {
+        // Reset de contraseña — ir a la página de cambio de clave
+        return NextResponse.redirect(`${origin}/cambiar-password`)
+      }
+      // Confirmación de email u otro tipo — ir al destino o login
+      return NextResponse.redirect(`${origin}${next}`)
     }
-  )
-
-  const { error } = await supabase.auth.exchangeCodeForSession(code)
-
-  if (error) {
-    return NextResponse.redirect(`${origin}/login?error=link_expirado`)
   }
 
-  // Si es recovery (reset de contraseña) → página de cambio de contraseña
-  if (type === 'recovery') {
-    return NextResponse.redirect(`${origin}/cambiar-password`)
-  }
-
-  return NextResponse.redirect(`${origin}${next}`)
+  // Error o token inválido — redirigir al login con mensaje
+  return NextResponse.redirect(`${origin}/login?error=link_invalido`)
 }
