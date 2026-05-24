@@ -1,3 +1,4 @@
+// src/app/dashboard/legajos/page.tsx
 import { createClient } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
 import LegajosClient from './LegajosClient'
@@ -13,6 +14,7 @@ export default async function LegajosPage() {
       .select(`
         id, razon_social, cuit, tipo_proveedor, estado, created_at,
         rubros(nombre),
+        proveedor_rubros(rubros(id, nombre, codigo)),
         documentos_legajo(id, estado, fecha_venc)
       `)
       .order('created_at', { ascending: false }),

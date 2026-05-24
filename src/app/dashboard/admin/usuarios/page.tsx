@@ -1,3 +1,4 @@
+// src/app/dashboard/admin/usuarios/page.tsx
 import { createClient } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
 import { getGrupoId } from '@/lib/grupo'
@@ -16,7 +17,7 @@ export default async function AdminUsuariosPage() {
 
   const { data: usuarios } = await supabase
     .from('usuarios')
-    .select('id, nombre, email, rol, activo, created_at')
+    .select('id, nombre, email, rol, activo, supervisor_scope, created_at')
     .eq('grupo_id', grupoId)
     .order('created_at', { ascending: true })
 
@@ -26,6 +27,7 @@ export default async function AdminUsuariosPage() {
         <h1 className="text-xl font-medium">Usuarios internos</h1>
         <p className="text-zinc-500 text-sm">
           Gestioná los usuarios del sistema — evaluadores, operarios y porteros.
+          Los supervisores y auditores pueden tener acceso a todos los establecimientos o solo a los asignados.
         </p>
       </div>
       <UsuariosAdmin
