@@ -11,7 +11,6 @@ import AccionesRapidasLegajo from './AccionesRapidasLegajo'
 
 type Tab = 'documentos' | 'equipos' | 'auditorias' | 'historial'
 
-// Next.js 15: params y searchParams son Promises
 export default async function LegajoDetallePage({
   params,
   searchParams,
@@ -19,7 +18,6 @@ export default async function LegajoDetallePage({
   params: Promise<{ id: string }>
   searchParams: Promise<{ tab?: string }>
 }) {
-  // Await ambos antes de usar
   const { id } = await params
   const { tab: tabParam } = await searchParams
 
@@ -34,6 +32,7 @@ export default async function LegajoDetallePage({
     .select(`
       id, razon_social, cuit, tipo_proveedor, estado, email, telefono, created_at,
       rubros(nombre),
+      proveedor_rubros(rubros(id, nombre, codigo)),
       documentos_legajo(
         id, estado, fecha_venc, observaciones, archivo_url,
         fecha_presentacion, fecha_revision, updated_at,
@@ -44,6 +43,21 @@ export default async function LegajoDetallePage({
     .maybeSingle()
 
   if (!proveedor) redirect('/dashboard/legajos')
+
+  // ── Rubros del proveedor — combina nueva tabla + legacy ──────────────────
+  const rubrosNombres: string[] = []
+  const rubrosVistos = new Set<string>()
+  for (const pr of (proveedor.proveedor_rubros as any[]) ?? []) {
+    const nombre = pr.rubros?.nombre
+    if (nombre && !rubrosVistos.has(nombre)) {
+      rubrosNombres.push(nombre)
+      rubrosVistos.add(nombre)
+    }
+  }
+  // Fallback al campo legacy si no hay nada en proveedor_rubros
+  if (rubrosNombres.length === 0 && (proveedor.rubros as any)?.nombre) {
+    rubrosNombres.push((proveedor.rubros as any).nombre)
+  }
 
   // Historial
   const { data: historialData } = await supabase
@@ -87,7 +101,7 @@ export default async function LegajoDetallePage({
     .eq('proveedor_id', id)
     .order('visitado_at', { ascending: false })
 
-  // Habilitación (para Ver QR)
+  // Habilitación
   const { data: habilitacion } = await supabase
     .from('habilitaciones')
     .select('qr_token, estado')
@@ -160,12 +174,25 @@ export default async function LegajoDetallePage({
               {estadoProvLabel[proveedor.estado] ?? proveedor.estado}
             </span>
           </div>
-          <p className="text-zinc-500 text-sm">
-            CUIT {proveedor.cuit} · {(proveedor.rubros as any)?.nombre} · {proveedor.tipo_proveedor}
-            <span className="ml-3 text-zinc-600">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-zinc-500 text-sm">
+              CUIT {proveedor.cuit} · {proveedor.tipo_proveedor}
+            </p>
+            {/* ── Rubros como chips ── */}
+            {rubrosNombres.length > 0 && (
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {rubrosNombres.map(nombre => (
+                  <span key={nombre}
+                    className="text-xs bg-blue-500/10 border border-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full">
+                    {nombre}
+                  </span>
+                ))}
+              </div>
+            )}
+            <span className="text-zinc-600 text-sm">
               Alta: {new Date(proveedor.created_at).toLocaleDateString('es-AR')}
             </span>
-          </p>
+          </div>
         </div>
 
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
@@ -213,6 +240,18 @@ export default async function LegajoDetallePage({
           )}
         </div>
       </div>
+
+      {/* ── Rubros detallados (si tiene más de 1) ── */}
+      {rubrosNombres.length > 1 && (
+        <div className="bg-blue-500/5 border border-blue-500/15 rounded-xl px-4 py-3 mb-5 flex items-center gap-3 flex-wrap">
+          <p className="text-blue-400 text-xs font-medium">Rubros habilitados:</p>
+          {rubrosNombres.map(nombre => (
+            <span key={nombre} className="text-xs bg-blue-500/10 border border-blue-500/20 text-blue-300 px-2.5 py-1 rounded-full">
+              {nombre}
+            </span>
+          ))}
+        </div>
+      )}
 
       {obligatoriosSinCargar > 0 && proveedor.estado !== 'APROBADO' && (
         <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-xl px-4 py-3 mb-5 flex items-center gap-2">
