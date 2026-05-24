@@ -68,18 +68,19 @@ export default function AccesoOperadorPage() {
 
   useEffect(() => {
     // Cargar establecimientos
-    supabase
-      .from('establecimientos')
-      .select('id, nombre, modo_acceso, tipos_establecimiento(icono, nombre)')
-      .eq('activo', true)
-      .in('modo_acceso', ['OPERADOR', 'AMBOS'])
-      .then(({ data }) => {
+    ;(async () => {
+      try {
+        const { data } = await supabase
+          .from('establecimientos')
+          .select('id, nombre, modo_acceso, tipos_establecimiento(icono, nombre)')
+          .eq('activo', true)
+          .in('modo_acceso', ['OPERADOR', 'AMBOS'])
         if (data) {
           setEstablecimientos(data)
           if (data.length === 1) setEstabSeleccionado(data[0].id)
         }
-      })
-      .catch(() => {})
+      } catch {}
+    })()
 
     cargarStats()
   }, [])
