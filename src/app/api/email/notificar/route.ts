@@ -45,21 +45,19 @@ export async function POST(req: Request) {
     const from = `"${config.smtp_from_name || 'Sistema Legajos'}" <${config.smtp_from_email || config.smtp_user}>`
     const rubro = (proveedor.rubros as any)?.nombre ?? ''
 
-    // Para vencimiento_proximo, obtener los docs que vencen en los próximos 30 días
+    // Para vencimiento: traer vencidos + por vencer en 30 días
     let docsVencimiento: any[] = []
     if (tipo === 'vencimiento_proximo') {
-      const hoyStr = new Date().toISOString().split('T')[0]
       const en30dias = new Date()
       en30dias.setDate(en30dias.getDate() + 30)
       const en30diasStr = en30dias.toISOString().split('T')[0]
 
       const { data: docs } = await supabase
         .from('documentos_legajo')
-        .select('fecha_venc, documentos_requeridos(nombre)')
+        .select('fecha_venc, estado, documentos_requeridos(nombre)')
         .eq('proveedor_id', proveedor_id)
         .not('fecha_venc', 'is', null)
-        .lte('fecha_venc', en30diasStr)
-        .in('estado', ['CARGADO', 'APROBADO'])
+        .or(`estado.eq.VENCIDO,and(fecha_venc.lte.${en30diasStr},estado.in.(CARGADO,APROBADO))`)
         .order('fecha_venc')
 
       docsVencimiento = docs ?? []
@@ -105,29 +103,34 @@ export async function POST(req: Request) {
       // UX-P-03: nuevo template para recordatorio manual de vencimiento
       vencimiento_proximo: {
         to: proveedor.email,
-        subject: `Documentación por vencer — ${proveedor.razon_social}`,
+        subject: `Documentación vencida o por vencer — ${proveedor.razon_social}`,
         html: `<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px">
-          <h2 style="color:#92400e">Documentación próxima a vencer</h2>
+          <h2 style="color:#92400e">Alerta de documentación</h2>
           <p style="color:#374151;margin-bottom:16px">
-            Hola, te informamos que los siguientes documentos de <strong>${proveedor.razon_social}</strong> 
-            están próximos a vencer:
+            Hola, te informamos que los siguientes documentos de <strong>${proveedor.razon_social}</strong>
+            requieren atención:
           </p>
           ${docsVencimiento.length > 0
-            ? `<ul style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:16px 16px 16px 32px;color:#78350f;margin:0 0 16px">
+            ? `<ul style="border-radius:8px;padding:16px 16px 16px 32px;margin:0 0 16px;border:1px solid #fde68a;background:#fffbeb">
                 ${docsVencimiento.map((d: any) => {
                   const dias = Math.ceil(
                     (new Date(d.fecha_venc + 'T12:00:00').getTime() - Date.now()) / 86400000
                   )
-                  return `<li style="margin-bottom:6px">
-                    <strong>${(d.documentos_requeridos as any)?.nombre}</strong>
-                    — vence el ${new Date(d.fecha_venc + 'T12:00:00').toLocaleDateString('es-AR')}
-                    ${dias <= 0 ? ' <span style="color:#b91c1c">(vencido)</span>' : ` (en ${dias} día${dias !== 1 ? 's' : ''})`}
+                  const vencido = dias <= 0
+                  return `<li style="margin-bottom:8px;color:${vencido ? '#b91c1c' : '#78350f'}">
+                    <strong>${(d.documentos_requeridos as any)?.nombre}</strong><br/>
+                    <span style="font-size:13px">
+                      ${vencido
+                        ? `⚠ Venció el ${new Date(d.fecha_venc + 'T12:00:00').toLocaleDateString('es-AR')} (hace ${Math.abs(dias)} día${Math.abs(dias) !== 1 ? 's' : ''})`
+                        : `Vence el ${new Date(d.fecha_venc + 'T12:00:00').toLocaleDateString('es-AR')} (en ${dias} día${dias !== 1 ? 's' : ''})`
+                      }
+                    </span>
                   </li>`
                 }).join('')}
               </ul>`
-            : `<p style="color:#78350f">Tenés documentación próxima a vencer. Ingresá al sistema para renovarla.</p>`
+            : `<p style="color:#78350f">Tenés documentación que requiere renovación. Ingresá al sistema para actualizarla.</p>`
           }
-          <p style="color:#666">
+          <p style="color:#666;font-size:14px">
             Actualizá tu documentación en el portal para mantener habilitado tu acceso a los establecimientos.
           </p>
           <div style="margin-top:24px">
