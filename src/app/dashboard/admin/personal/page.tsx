@@ -19,7 +19,7 @@ export default async function AdminPersonalPage() {
     supabase
       .from('personal_habilitado')
       .select(`
-        id, nombre, cuil, qr_token, activo, notas,
+        id, nombre, cuil, qr_token, activo, notas, vigencia_hasta,
         personal_establecimientos(
           establecimiento_id,
           establecimientos(nombre)
@@ -41,7 +41,7 @@ export default async function AdminPersonalPage() {
         <h1 className="text-xl font-medium">Personal habilitado</h1>
         <p className="text-zinc-500 text-sm">
           Personas con acceso a los establecimientos mediante carnet QR individual.
-          Cada persona tiene su propio código QR que muestra nombre y CUIL para verificación en puerta.
+          Cada persona tiene nombre, CUIL y fecha de vigencia del permiso.
         </p>
       </div>
       <PersonalHabilitadoAdmin

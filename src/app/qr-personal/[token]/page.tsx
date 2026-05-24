@@ -1,7 +1,4 @@
 // src/app/qr-personal/[token]/page.tsx
-// Carnet QR público para personal habilitado
-// Muestra nombre + CUIL para verificación en puerta
-
 import { createClient } from '@/lib/supabase-server'
 import { notFound } from 'next/navigation'
 
@@ -23,12 +20,20 @@ export default async function QRPersonalPage({
   const nombre   = resultado.nombre
   const cuil     = resultado.cuil
   const motivo   = resultado.motivo
+  const vigencia = resultado.vigencia_hasta
   const establecimientos: { id: string; nombre: string }[] = resultado.establecimientos ?? []
 
   const motivoLabel: Record<string, string> = {
     PERSONA_INACTIVA:              'Persona dada de baja — sin acceso habilitado',
+    PERMISO_VENCIDO:               'El permiso de acceso ha vencido',
     ESTABLECIMIENTO_NO_HABILITADO: 'No habilitado para este establecimiento',
     'QR no reconocido':            'QR no reconocido por el sistema',
+  }
+
+  function formatFecha(f: string) {
+    return new Date(f + 'T12:00:00').toLocaleDateString('es-AR', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+    })
   }
 
   return (
@@ -53,12 +58,10 @@ export default async function QRPersonalPage({
 
         {/* Card principal */}
         <div className={`rounded-2xl border p-8 text-center ${
-          valido
-            ? 'bg-green-500/5 border-green-500/30'
-            : 'bg-red-500/5 border-red-500/30'
+          valido ? 'bg-green-500/5 border-green-500/30' : 'bg-red-500/5 border-red-500/30'
         }`}>
 
-          {/* Ícono de estado */}
+          {/* Ícono */}
           <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-5 ${
             valido ? 'bg-green-500/10' : 'bg-red-500/10'
           }`}>
@@ -80,17 +83,28 @@ export default async function QRPersonalPage({
             {valido ? 'Acceso habilitado' : 'Acceso denegado'}
           </h1>
 
-          {/* Datos de la persona — siempre visibles si existen */}
+          {/* Datos de identidad — siempre visibles si existen */}
           {nombre && (
             <div className="bg-white/[0.04] border border-white/[0.08] rounded-xl px-5 py-4 mb-4 text-left">
               <p className="text-zinc-500 text-xs mb-1 uppercase tracking-wide font-medium">Nombre</p>
-              <p className="text-white text-xl font-semibold">{nombre}</p>
+              <p className="text-white text-2xl font-bold">{nombre}</p>
+
               {cuil && (
                 <>
-                  <p className="text-zinc-500 text-xs mt-3 mb-1 uppercase tracking-wide font-medium">CUIL</p>
-                  <p className="text-zinc-200 text-lg font-mono tracking-widest">{cuil}</p>
+                  <div className="border-t border-white/[0.06] my-3"/>
+                  <p className="text-zinc-500 text-xs mb-1 uppercase tracking-wide font-medium">CUIL</p>
+                  <p className="text-zinc-100 text-xl font-mono tracking-widest">{cuil}</p>
                 </>
               )}
+            </div>
+          )}
+
+          {/* Vigencia — solo si está habilitado */}
+          {valido && vigencia && (
+            <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl px-4 py-2.5 mb-4 text-left">
+              <p className="text-blue-400 text-xs font-medium">
+                Permiso vigente hasta {formatFecha(vigencia)}
+              </p>
             </div>
           )}
 
@@ -112,11 +126,17 @@ export default async function QRPersonalPage({
           )}
 
           {/* Motivo de rechazo */}
-          {!valido && motivo && (
+          {!valido && (
             <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3 mt-2">
               <p className="text-red-300 text-sm">
                 {motivoLabel[motivo] ?? motivo}
               </p>
+              {/* Mostrar fecha de vencimiento del permiso si aplica */}
+              {motivo === 'PERMISO_VENCIDO' && vigencia && (
+                <p className="text-red-400/70 text-xs mt-1">
+                  Venció el {formatFecha(vigencia)}
+                </p>
+              )}
             </div>
           )}
         </div>
