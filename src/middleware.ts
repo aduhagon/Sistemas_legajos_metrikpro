@@ -93,6 +93,7 @@ export async function middleware(request: NextRequest) {
 
   // Rutas públicas — no requieren sesión
   const rutasPublicas = [
+    '/',              // pantalla de selección proveedor/colaborador — siempre pública
     '/login',
     '/registro',
     '/auth',
@@ -124,8 +125,9 @@ export async function middleware(request: NextRequest) {
 
     const rol = usuarioData?.rol
 
-    // Desde raíz o login → redirigir según rol
-    if (path === '/' || path === '/login') {
+    // Desde /login → redirigir según rol
+    // La raíz '/' es siempre pública (pantalla de selección proveedor/colaborador)
+    if (path === '/login') {
       if (rol === 'operador_acceso') return NextResponse.redirect(new URL('/acceso', request.url))
       if (rol === 'auditor')         return NextResponse.redirect(new URL('/auditor', request.url))
       return NextResponse.redirect(new URL('/dashboard', request.url))
