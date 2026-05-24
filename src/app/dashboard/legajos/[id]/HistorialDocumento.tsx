@@ -17,8 +17,14 @@ const actorColor: Record<string, string> = {
   sistema:   'bg-zinc-500/10 text-zinc-500',
 }
 
-export default function HistorialDocumento({ historial }: { historial: Evento[] }) {
-  const [abierto, setAbierto] = useState(false)
+export default function HistorialDocumento({
+  historial,
+  expandidoPorDefecto = false,
+}: {
+  historial: Evento[]
+  expandidoPorDefecto?: boolean
+}) {
+  const [abierto, setAbierto] = useState(expandidoPorDefecto)
 
   if (historial.length === 0) return null
 
@@ -26,10 +32,9 @@ export default function HistorialDocumento({ historial }: { historial: Evento[] 
 
   return (
     <div className="mt-2">
-      {/* Trigger colapsable */}
       <button
         onClick={() => setAbierto(v => !v)}
-        className="flex items-center gap-2 text-zinc-600 hover:text-zinc-400 text-xs transition-colors group">
+        className="flex items-center gap-2 text-zinc-600 hover:text-zinc-400 text-xs transition-colors">
         <svg
           width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
           className={`transition-transform ${abierto ? 'rotate-90' : ''}`}>
@@ -40,7 +45,6 @@ export default function HistorialDocumento({ historial }: { historial: Evento[] 
             ? 'Ocultar historial'
             : `Ver historial (${historial.length} evento${historial.length !== 1 ? 's' : ''})`}
         </span>
-        {/* Preview del último evento cuando está colapsado */}
         {!abierto && (
           <span className="text-zinc-700 ml-1">
             — último: {ultimo.estado_nuevo.toLowerCase()} el{' '}
@@ -51,7 +55,6 @@ export default function HistorialDocumento({ historial }: { historial: Evento[] 
         )}
       </button>
 
-      {/* Historial expandido */}
       {abierto && (
         <div className="mt-2 pl-3 border-l border-white/[0.06] space-y-1.5">
           {historial.map((h) => (
