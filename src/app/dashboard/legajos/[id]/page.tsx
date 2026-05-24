@@ -5,6 +5,7 @@ import AccionesLegajo from './AccionesLegajo'
 import AccionesDocumento from './AccionesDocumento'
 import AccionesDocumentoEquipo from '@/components/AccionesDocumentoEquipo'
 import VisitasAuditoriaLegajo from './VisitasAuditoriaLegajo'
+import HistorialDocumento from './HistorialDocumento'
 
 export default async function LegajoDetallePage({ params }: { params: { id: string } }) {
   const supabase = createClient()
@@ -88,12 +89,6 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
     APROBADO:  'text-green-400 border-green-500/20 bg-green-500/10',
     RECHAZADO: 'text-red-400 border-red-500/20 bg-red-500/10',
     VENCIDO:   'text-orange-400 border-orange-500/20 bg-orange-500/10',
-  }
-
-  const actorColor: Record<string, string> = {
-    proveedor: 'bg-blue-500/10 text-blue-400',
-    evaluador: 'bg-purple-500/10 text-purple-400',
-    sistema:   'bg-zinc-500/10 text-zinc-500',
   }
 
   // Stats de equipos
@@ -237,7 +232,7 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
                       <div className="w-1.5 h-1.5 rounded-full bg-zinc-500"/>
                       <span className="text-zinc-600 text-xs">
                         Vence: <span className="text-zinc-400">
-                          {new Date(doc.fecha_venc).toLocaleDateString('es-AR')}
+                          {new Date(doc.fecha_venc + 'T12:00:00').toLocaleDateString('es-AR')}
                         </span>
                       </span>
                     </div>
@@ -248,27 +243,8 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
                   <p className="text-orange-400 text-xs italic mb-2">"{doc.observaciones}"</p>
                 )}
 
-                {historial.length > 0 && (
-                  <div className="mt-2 pl-3 border-l border-white/[0.06] space-y-1.5">
-                    {historial.map((h: any) => (
-                      <div key={h.id} className="flex items-center gap-2 text-xs flex-wrap">
-                        <span className={`px-1.5 py-0.5 rounded ${actorColor[h.actor_tipo] ?? actorColor.sistema}`}>
-                          {h.actor_tipo}
-                        </span>
-                        <span className="text-zinc-600">
-                          {h.estado_anterior && <>{h.estado_anterior.toLowerCase()} → </>}
-                          <span className="text-zinc-400">{h.estado_nuevo.toLowerCase()}</span>
-                        </span>
-                        {h.observaciones && (
-                          <span className="text-orange-400 italic">"{h.observaciones}"</span>
-                        )}
-                        <span className="text-zinc-700 ml-auto">
-                          {new Date(h.created_at).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                {/* UX-P-02: historial colapsado — Client Component */}
+                <HistorialDocumento historial={historial} />
 
                 <AccionesDocumento
                   docId={doc.id}
@@ -283,7 +259,7 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
       </div>
 
       {/* ── EQUIPOS / BIENES ── */}
-      <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
+      <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden mb-6">
         <div className="px-6 py-4 border-b border-white/[0.06] flex items-center justify-between">
           <div>
             <h2 className="text-sm font-medium">Equipos y bienes de uso</h2>
@@ -319,15 +295,12 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
 
               return (
                 <details key={equipo.id} className="group">
-                  {/* Header del equipo */}
                   <summary className="px-6 py-4 flex items-center gap-4 cursor-pointer list-none hover:bg-white/[0.01] transition-colors">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
                       className="text-zinc-600 group-open:rotate-90 transition-transform shrink-0">
                       <polyline points="9 18 15 12 9 6"/>
                     </svg>
-
                     <span className="text-xl shrink-0">{tipo?.icono}</span>
-
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-white font-medium font-mono">{equipo.dominio}</span>
@@ -347,13 +320,11 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
                         <span className="text-zinc-600 text-xs">{docsAprobadosEq}/{docsEquipo.length} docs</span>
                       </div>
                     </div>
-
                     <span className={`text-xs px-2.5 py-1 rounded-full border shrink-0 ${estadoEquipoColor[equipo.estado] ?? estadoEquipoColor.PENDIENTE}`}>
                       {equipo.estado.toLowerCase()}
                     </span>
                   </summary>
 
-                  {/* Documentos del equipo */}
                   <div className="border-t border-white/[0.04]">
                     {docsEquipo.length === 0 ? (
                       <div className="px-6 py-4 text-center">
@@ -377,7 +348,7 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
                                     <span className="text-zinc-600 text-xs">{dr?.tipo_vigencia}</span>
                                     {doc.fecha_venc && (
                                       <span className="text-zinc-500 text-xs">
-                                        Vence: {new Date(doc.fecha_venc).toLocaleDateString('es-AR')}
+                                        Vence: {new Date(doc.fecha_venc + 'T12:00:00').toLocaleDateString('es-AR')}
                                       </span>
                                     )}
                                     {doc.updated_at && doc.estado === 'CARGADO' && (
@@ -420,18 +391,27 @@ export default async function LegajoDetallePage({ params }: { params: { id: stri
             })}
           </div>
         )}
-
-        {/* ── VISITAS DE AUDITORÍA ── */}
-        {(visitasAuditoria ?? []).length > 0 || true ? (
-          <div>
-            <h2 className="text-base font-medium mb-4">Visitas de auditoría</h2>
-            <VisitasAuditoriaLegajo
-              visitas={visitasAuditoria ?? []}
-              rol={usuario?.rol ?? 'evaluador'}
-            />
-          </div>
-        ) : null}
       </div>
+
+      {/* ── VISITAS DE AUDITORÍA ── */}
+      <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-white/[0.06]">
+          <h2 className="text-sm font-medium">Visitas de auditoría</h2>
+          <p className="text-zinc-500 text-xs mt-0.5">
+            {(visitasAuditoria ?? []).length === 0
+              ? 'Sin visitas registradas'
+              : `${(visitasAuditoria ?? []).length} visita${(visitasAuditoria ?? []).length !== 1 ? 's' : ''} registrada${(visitasAuditoria ?? []).length !== 1 ? 's' : ''}`
+            }
+          </p>
+        </div>
+        <div className="px-6 py-4">
+          <VisitasAuditoriaLegajo
+            visitas={visitasAuditoria ?? []}
+            rol={usuario?.rol ?? 'evaluador'}
+          />
+        </div>
+      </div>
+
     </div>
   )
 }
