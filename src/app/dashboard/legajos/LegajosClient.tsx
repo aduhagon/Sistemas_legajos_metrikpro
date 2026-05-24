@@ -355,10 +355,12 @@ export default function LegajosClient({
   proveedores,
   rubros,
   grupoId,
+  scopeRestringido = false,
 }: {
   proveedores: Proveedor[]
   rubros: { id: string; nombre: string }[]
   grupoId: string
+  scopeRestringido?: boolean
 }) {
   const [busqueda, setBusqueda]         = useState('')
   const [filtroEstado, setFiltroEstado] = useState('TODOS')
@@ -458,6 +460,20 @@ export default function LegajosClient({
           </button>
         </div>
       </div>
+
+      {/* Aviso de scope restringido */}
+      {scopeRestringido && (
+        <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl px-4 py-3 mb-4 flex items-center gap-2">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" className="shrink-0">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          <p className="text-amber-400 text-sm">
+            Mostrando solo los proveedores de tus establecimientos asignados.
+          </p>
+        </div>
+      )}
 
       {/* Búsqueda + filtro rubro */}
       <div className="flex gap-2 mb-3">
