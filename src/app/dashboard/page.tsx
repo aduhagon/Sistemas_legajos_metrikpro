@@ -36,7 +36,7 @@ export default async function DashboardPage() {
     .order('fecha_venc')
     .limit(5)
 
-  // Docs de EQUIPOS por vencer en 7 días
+  // Docs de EQUIPOS por vencer en 7 días — con link al legajo del proveedor
   const { data: equiposPorVencer } = await supabase
     .from('documentos_equipo')
     .select(`
@@ -51,16 +51,25 @@ export default async function DashboardPage() {
     .order('fecha_venc')
     .limit(5)
 
-  // Docs de equipos VENCIDOS (para badge de urgencia)
-  const { count: equiposVencidos } = await supabase
+  // Docs de equipos VENCIDOS — con datos del proveedor para linkear al legajo
+  const { data: equiposVencidosData } = await supabase
     .from('documentos_equipo')
-    .select('*', { count: 'exact', head: true })
+    .select(`
+      id,
+      equipos_contratista(proveedores(id, razon_social))
+    `)
     .eq('estado', 'VENCIDO')
+    .limit(5)
 
-  // FIX UX-H-01: usar variable booleana explícita para evitar que
-  // equiposVencidos === 0 se renderice como texto "0" en el JSX
-  const hayEquiposVencidos = (equiposVencidos ?? 0) > 0
+  const equiposVencidos = equiposVencidosData?.length ?? 0
+
+  // FIX UX-H-01: variables booleanas explícitas para evitar render de "0"
+  const hayEquiposVencidos  = equiposVencidos > 0
   const hayEquiposPorVencer = (equiposPorVencer?.length ?? 0) > 0
+
+  // Para el link al primer legajo con equipo vencido (caso más frecuente: 1 solo proveedor)
+  const primerProveedorConEquipoVencido = (equiposVencidosData?.[0] as any)
+    ?.equipos_contratista?.proveedores?.id ?? null
 
   return (
     <div>
@@ -79,17 +88,25 @@ export default async function DashboardPage() {
             <div className="space-y-0.5">
               {porVencer.map((doc: any) => (
                 <p key={doc.id} className="text-zinc-500 text-xs">
-                  <Link href={`/dashboard/legajos/${doc.proveedores?.id}`}
+                  {/* UX-P-03: link directo al legajo del proveedor */}
+                  <Link
+                    href={`/dashboard/legajos/${doc.proveedores?.id}`}
                     className="text-zinc-400 hover:text-white transition-colors">
                     {doc.proveedores?.razon_social}
                   </Link>
                   {' — '}{doc.documentos_requeridos?.nombre}
                   <span className="text-yellow-600 ml-1">
-                    ({new Date(doc.fecha_venc).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })})
+                    ({new Date(doc.fecha_venc + 'T12:00:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })})
                   </span>
                 </p>
               ))}
             </div>
+            {/* Link directo a la sección vencimientos en Reportes */}
+            <Link
+              href="/dashboard/reportes?tab=vencimientos"
+              className="inline-block mt-2 text-yellow-600 hover:text-yellow-400 text-xs transition-colors">
+              Ver todos los vencimientos →
+            </Link>
           </div>
         </div>
       )}
@@ -112,8 +129,22 @@ export default async function DashboardPage() {
           <div className="flex-1">
             {hayEquiposVencidos && (
               <p className="text-red-400 text-sm font-medium mb-1">
-                🔴 {equiposVencidos} documento{(equiposVencidos ?? 0) > 1 ? 's' : ''} de equipos vencido{(equiposVencidos ?? 0) > 1 ? 's' : ''}
-                {' '}<Link href="/dashboard/reportes" className="text-red-300 hover:text-red-200 underline transition-colors">Ver en reportes →</Link>
+                🔴 {equiposVencidos} documento{equiposVencidos > 1 ? 's' : ''} de equipos vencido{equiposVencidos > 1 ? 's' : ''}
+                {' — '}
+                {/* UX-P-03: si hay un solo proveedor afectado, link directo al legajo; si hay varios, a reportes */}
+                {primerProveedorConEquipoVencido && equiposVencidos === 1 ? (
+                  <Link
+                    href={`/dashboard/legajos/${primerProveedorConEquipoVencido}`}
+                    className="text-red-300 hover:text-red-200 underline transition-colors">
+                    Ver legajo →
+                  </Link>
+                ) : (
+                  <Link
+                    href="/dashboard/reportes?tab=vencimientos"
+                    className="text-red-300 hover:text-red-200 underline transition-colors">
+                    Ver en reportes →
+                  </Link>
+                )}
               </p>
             )}
             {hayEquiposPorVencer && (
@@ -127,14 +158,16 @@ export default async function DashboardPage() {
                     return (
                       <p key={doc.id} className="text-zinc-500 text-xs">
                         <span className="mr-1">{equipo?.tipos_equipo?.icono}</span>
-                        <Link href={`/dashboard/legajos/${equipo?.proveedores?.id}`}
+                        {/* UX-P-03: link directo al legajo del proveedor del equipo */}
+                        <Link
+                          href={`/dashboard/legajos/${equipo?.proveedores?.id}`}
                           className="text-zinc-400 hover:text-white transition-colors">
                           {equipo?.proveedores?.razon_social}
                         </Link>
                         {' · '}<span className="font-mono text-zinc-500">{equipo?.dominio}</span>
                         {' — '}{doc.documentos_requeridos_equipo?.nombre}
                         <span className="text-orange-600 ml-1">
-                          ({new Date(doc.fecha_venc).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })})
+                          ({new Date(doc.fecha_venc + 'T12:00:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })})
                         </span>
                       </p>
                     )
@@ -211,7 +244,7 @@ export default async function DashboardPage() {
           <p className="text-zinc-500 text-xs">Métricas y exportación</p>
           {hayEquiposVencidos && (
             <span className="mt-2 inline-block bg-red-500/10 text-red-400 border border-red-500/20 text-xs px-2 py-0.5 rounded-full">
-              {equiposVencidos} equipo{(equiposVencidos ?? 0) > 1 ? 's' : ''} vencido{(equiposVencidos ?? 0) > 1 ? 's' : ''}
+              {equiposVencidos} equipo{equiposVencidos > 1 ? 's' : ''} vencido{equiposVencidos > 1 ? 's' : ''}
             </span>
           )}
         </Link>

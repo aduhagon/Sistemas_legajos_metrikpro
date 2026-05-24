@@ -45,6 +45,26 @@ export async function POST(req: Request) {
     const from = `"${config.smtp_from_name || 'Sistema Legajos'}" <${config.smtp_from_email || config.smtp_user}>`
     const rubro = (proveedor.rubros as any)?.nombre ?? ''
 
+    // Para vencimiento_proximo, obtener los docs que vencen en los próximos 30 días
+    let docsVencimiento: any[] = []
+    if (tipo === 'vencimiento_proximo') {
+      const hoyStr = new Date().toISOString().split('T')[0]
+      const en30dias = new Date()
+      en30dias.setDate(en30dias.getDate() + 30)
+      const en30diasStr = en30dias.toISOString().split('T')[0]
+
+      const { data: docs } = await supabase
+        .from('documentos_legajo')
+        .select('fecha_venc, documentos_requeridos(nombre)')
+        .eq('proveedor_id', proveedor_id)
+        .not('fecha_venc', 'is', null)
+        .lte('fecha_venc', en30diasStr)
+        .in('estado', ['CARGADO', 'APROBADO'])
+        .order('fecha_venc')
+
+      docsVencimiento = docs ?? []
+    }
+
     const templates: Record<string, { to: string; subject: string; html: string }> = {
       nuevo_legajo: {
         to: config.notif_evaluador_email || config.smtp_user,
@@ -80,6 +100,42 @@ export async function POST(req: Request) {
             <p style="margin:6px 0 0;color:#dc2626;font-size:14px">Tu legajo requiere correcciones.</p>
           </div>
           <p style="color:#666">Revisá el sistema para ver las observaciones y subir la documentación corregida.</p>
+        </div>`,
+      },
+      // UX-P-03: nuevo template para recordatorio manual de vencimiento
+      vencimiento_proximo: {
+        to: proveedor.email,
+        subject: `Documentación por vencer — ${proveedor.razon_social}`,
+        html: `<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px">
+          <h2 style="color:#92400e">Documentación próxima a vencer</h2>
+          <p style="color:#374151;margin-bottom:16px">
+            Hola, te informamos que los siguientes documentos de <strong>${proveedor.razon_social}</strong> 
+            están próximos a vencer:
+          </p>
+          ${docsVencimiento.length > 0
+            ? `<ul style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:16px 16px 16px 32px;color:#78350f;margin:0 0 16px">
+                ${docsVencimiento.map((d: any) => {
+                  const dias = Math.ceil(
+                    (new Date(d.fecha_venc + 'T12:00:00').getTime() - Date.now()) / 86400000
+                  )
+                  return `<li style="margin-bottom:6px">
+                    <strong>${(d.documentos_requeridos as any)?.nombre}</strong>
+                    — vence el ${new Date(d.fecha_venc + 'T12:00:00').toLocaleDateString('es-AR')}
+                    ${dias <= 0 ? ' <span style="color:#b91c1c">(vencido)</span>' : ` (en ${dias} día${dias !== 1 ? 's' : ''})`}
+                  </li>`
+                }).join('')}
+              </ul>`
+            : `<p style="color:#78350f">Tenés documentación próxima a vencer. Ingresá al sistema para renovarla.</p>`
+          }
+          <p style="color:#666">
+            Actualizá tu documentación en el portal para mantener habilitado tu acceso a los establecimientos.
+          </p>
+          <div style="margin-top:24px">
+            <a href="${process.env.NEXT_PUBLIC_SITE_URL ?? 'https://sistemas-legajos-metrikpro.vercel.app'}/proveedor/portal"
+               style="background:#2563eb;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">
+              Ir al portal →
+            </a>
+          </div>
         </div>`,
       },
     }
