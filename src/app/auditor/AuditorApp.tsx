@@ -30,6 +30,18 @@ const RESULTADO_LABEL: Record<string, string> = {
   OBSERVACION: '○ Observación',
 }
 
+// UX-H-03: mapeo de estados técnicos a lenguaje de negocio
+const ESTADO_HAB_LABEL: Record<string, string> = {
+  VIGENTE:       'Vigente',
+  DOC_PENDIENTE: 'Doc. pendiente',
+  EN_REVISION:   'En revisión',
+  VENCIDA:       'Vencida',
+  SUSPENDIDA:    'Suspendida',
+}
+function formatEstadoHab(estado: string): string {
+  return ESTADO_HAB_LABEL[estado] ?? estado
+}
+
 const DB_KEY = 'auditor_visitas_queue'
 const SNAP_KEY = (id: string) => `auditor_snap_${id}`
 
@@ -163,23 +175,31 @@ function QRScanner({ onScan, onClose }: { onScan: (token: string) => void; onClo
 
 // ── Componente principal ─────────────────────────────────────
 export default function AuditorApp({ establecimientos, auditorId }: { establecimientos: Establecimiento[]; auditorId: string }) {
-  const [online, setOnline]               = useState(true)
+  const [online, setOnline]                 = useState(true)
   const [scannerAbierto, setScannerAbierto] = useState(false)
-  const [vista, setVista]                 = useState<'inicio'|'escanear'|'visita'|'cola'>('inicio')
-  const [estSeleccionado, setEst]         = useState<Establecimiento | null>(null)
-  const [snapshot, setSnapshot]           = useState<Snapshot | null>(null)
-  const [loadingSnap, setLoadingSnap]     = useState(false)
-  const [qrInput, setQrInput]             = useState('')
-  const [proveedorEncontrado, setProv]    = useState<ProveedorSnap | null>(null)
-  const [resultado, setResultado]         = useState<'CONFORME'|'NO_CONFORME'|'URGENTE'|'OBSERVACION'>('CONFORME')
-  const [observacion, setObservacion]     = useState('')
-  const [checklistResp, setChecklistResp] = useState<Record<string, { cumple: boolean; obs: string }>>({})
-  const [foto, setFoto]                   = useState<string | null>(null)
-  const [cola, setCola]                   = useState<VisitaLocal[]>([])
-  const [sincronizando, setSincronizando] = useState(false)
-  const [guardando, setGuardando]         = useState(false)
-  const [msg, setMsg]                     = useState('')
+  const [vista, setVista]                   = useState<'inicio'|'escanear'|'visita'|'cola'>('inicio')
+  const [estSeleccionado, setEst]           = useState<Establecimiento | null>(null)
+  const [snapshot, setSnapshot]             = useState<Snapshot | null>(null)
+  const [loadingSnap, setLoadingSnap]       = useState(false)
+  const [qrInput, setQrInput]               = useState('')
+  const [proveedorEncontrado, setProv]      = useState<ProveedorSnap | null>(null)
+  const [resultado, setResultado]           = useState<'CONFORME'|'NO_CONFORME'|'URGENTE'|'OBSERVACION'>('CONFORME')
+  const [observacion, setObservacion]       = useState('')
+  const [checklistResp, setChecklistResp]   = useState<Record<string, { cumple: boolean; obs: string }>>({})
+  const [foto, setFoto]                     = useState<string | null>(null)
+  const [cola, setCola]                     = useState<VisitaLocal[]>([])
+  const [sincronizando, setSincronizando]   = useState(false)
+  const [guardando, setGuardando]           = useState(false)
+  const [msg, setMsg]                       = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // UX-P-08: contador de visitas registradas en la jornada actual
+  const hoyStr = new Date().toISOString().split('T')[0]
+  const visitasHoy = cola.filter(v =>
+    v.visitado_at.startsWith(hoyStr) || v.sincronizado
+      ? v.visitado_at.startsWith(hoyStr)
+      : false
+  ).length
 
   useEffect(() => {
     const on  = () => { setOnline(true); sincronizarCola() }
@@ -214,7 +234,7 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
           p_lng: visita.lng ?? null,
           p_offline: true,
           p_visitado_at: visita.visitado_at,
-          p_checklist: visita.checklist,  // ✅ FIX: era JSON.stringify(visita.checklist)
+          p_checklist: visita.checklist,
         })
         if (data?.ok) {
           const idx = nuevaQ.findIndex(v => v.id === visita.id)
@@ -291,7 +311,7 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
         p_lng: gps?.lng ?? null,
         p_offline: false,
         p_visitado_at: ahora,
-        p_checklist: checklistArr,  // ✅ FIX: era JSON.stringify(checklistArr)
+        p_checklist: checklistArr,
       })
       if (data?.ok) { setMsg('Visita registrada'); resetVisita() }
       else setMsg('Error al guardar')
@@ -334,7 +354,6 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
 
   return (
     <>
-      {/* Scanner overlay — fuera del scroll principal */}
       {scannerAbierto && (
         <QRScanner
           onScan={(token) => { setScannerAbierto(false); buscarPorQR(token) }}
@@ -344,13 +363,19 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
 
       <div className="min-h-screen bg-[#0d0f17] text-white max-w-sm mx-auto px-4 py-6">
 
-        {/* Header */}
+        {/* Header — UX-P-08: contador de visitas del día */}
         <div className="flex items-center justify-between mb-6">
           <div>
             <p className="text-xs text-zinc-500 mb-0.5">Sistema Legajos</p>
             <h1 className="text-lg font-medium">App de auditoría</h1>
           </div>
           <div className="flex items-center gap-2">
+            {/* Contador visitas del día */}
+            {estSeleccionado && (
+              <div className="text-xs bg-white/[0.05] border border-white/[0.08] px-2.5 py-1 rounded-full text-zinc-400">
+                {visitasHoy} visita{visitasHoy !== 1 ? 's' : ''} hoy
+              </div>
+            )}
             {pendientes > 0 && (
               <button onClick={() => setVista('cola')}
                 className="text-xs bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 px-2 py-1 rounded-full">
@@ -410,7 +435,7 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
               </div>
             </div>
 
-            {/* Botón cámara principal */}
+            {/* Botón cámara */}
             <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-4 space-y-3">
               <p className="text-zinc-400 text-xs font-medium uppercase tracking-wide">Escanear QR</p>
               <button onClick={() => setScannerAbierto(true)}
@@ -442,27 +467,55 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
               )}
             </div>
 
-            {/* Lista rápida */}
+            {/* Lista de proveedores */}
             {snapshot?.proveedores && snapshot.proveedores.length > 0 && (
               <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
-                <p className="text-zinc-500 text-xs px-4 pt-3 pb-2 font-medium uppercase tracking-wide">Proveedores en el establecimiento</p>
+                <p className="text-zinc-500 text-xs px-4 pt-3 pb-2 font-medium uppercase tracking-wide">
+                  Proveedores en el establecimiento
+                </p>
                 <div className="divide-y divide-white/[0.04]">
-                  {snapshot.proveedores.slice(0, 10).map(prov => (
-                    <button key={prov.id} onClick={() => { setProv(prov); setVista('visita') }}
-                      className="w-full px-4 py-3 text-left hover:bg-white/[0.03] transition-colors flex items-center justify-between">
-                      <div>
-                        <p className="text-white text-sm">{prov.razon_social}</p>
-                        <p className="text-zinc-600 text-xs">{prov.cuit}</p>
-                      </div>
-                      <span className={`text-xs px-2 py-0.5 rounded-full border ${
-                        prov.habilitacion_estado === 'VIGENTE'      ? 'bg-green-500/10 text-green-400 border-green-500/20' :
-                        prov.habilitacion_estado === 'DOC_PENDIENTE'? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
-                        'bg-red-500/10 text-red-400 border-red-500/20'
-                      }`}>
-                        {prov.habilitacion_estado ?? prov.estado}
-                      </span>
-                    </button>
-                  ))}
+                  {snapshot.proveedores.slice(0, 10).map(prov => {
+                    const estadoHab = prov.habilitacion_estado ?? prov.estado
+                    const esEnRevision = estadoHab === 'EN_REVISION'
+
+                    return (
+                      <button key={prov.id} onClick={() => { setProv(prov); setVista('visita') }}
+                        className="w-full px-4 py-3 text-left hover:bg-white/[0.03] transition-colors">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white text-sm">{prov.razon_social}</p>
+                            <p className="text-zinc-600 text-xs">{prov.cuit}</p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {/* UX-P-08: ícono de advertencia para EN_REVISION */}
+                            {esEnRevision && (
+                              <span title="Documentación en revisión — consultar con supervisor antes de permitir ingreso">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#eab308" strokeWidth="2">
+                                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                                </svg>
+                              </span>
+                            )}
+                            {/* UX-H-03: badge con texto formateado */}
+                            <span className={`text-xs px-2 py-0.5 rounded-full border ${
+                              estadoHab === 'VIGENTE'       ? 'bg-green-500/10 text-green-400 border-green-500/20' :
+                              estadoHab === 'EN_REVISION'   ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
+                              estadoHab === 'DOC_PENDIENTE' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
+                              'bg-red-500/10 text-red-400 border-red-500/20'
+                            }`}>
+                              {formatEstadoHab(estadoHab)}
+                            </span>
+                          </div>
+                        </div>
+                        {/* UX-P-08: tooltip/aviso inline para EN_REVISION */}
+                        {esEnRevision && (
+                          <p className="text-yellow-600 text-xs mt-1.5 leading-relaxed">
+                            ⚠ Documentación en revisión — consultá con supervisor antes de permitir el ingreso
+                          </p>
+                        )}
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
             )}
@@ -479,18 +532,28 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
               <p className="font-medium text-sm">{proveedorEncontrado.razon_social}</p>
             </div>
 
-            {/* Estado */}
+            {/* Estado de habilitación — UX-H-03: texto formateado */}
             <div className={`rounded-xl border px-4 py-3 ${
               proveedorEncontrado.habilitacion_estado === 'VIGENTE'       ? 'bg-green-500/10 border-green-500/20' :
+              proveedorEncontrado.habilitacion_estado === 'EN_REVISION'   ? 'bg-yellow-500/10 border-yellow-500/20' :
               proveedorEncontrado.habilitacion_estado === 'DOC_PENDIENTE' ? 'bg-yellow-500/10 border-yellow-500/20' :
               'bg-red-500/10 border-red-500/20'
             }`}>
               <p className={`text-sm font-medium ${
                 proveedorEncontrado.habilitacion_estado === 'VIGENTE'       ? 'text-green-400' :
+                proveedorEncontrado.habilitacion_estado === 'EN_REVISION'   ? 'text-yellow-400' :
                 proveedorEncontrado.habilitacion_estado === 'DOC_PENDIENTE' ? 'text-yellow-400' : 'text-red-400'
-              }`}>Habilitación: {proveedorEncontrado.habilitacion_estado ?? proveedorEncontrado.estado}</p>
+              }`}>
+                Habilitación: {formatEstadoHab(proveedorEncontrado.habilitacion_estado ?? proveedorEncontrado.estado)}
+              </p>
               {proveedorEncontrado.docs_vencidos > 0 && (
                 <p className="text-red-400 text-xs mt-1">{proveedorEncontrado.docs_vencidos} documento(s) vencido(s)</p>
+              )}
+              {/* UX-P-08: aviso explícito si está en revisión */}
+              {proveedorEncontrado.habilitacion_estado === 'EN_REVISION' && (
+                <p className="text-yellow-300 text-xs mt-1.5 leading-relaxed">
+                  ⚠ Este proveedor tiene documentación en revisión. Consultá con tu supervisor antes de permitir el ingreso.
+                </p>
               )}
             </div>
 
