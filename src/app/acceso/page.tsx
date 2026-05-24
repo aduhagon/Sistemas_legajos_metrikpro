@@ -15,12 +15,10 @@ type Resultado = {
   motivo?: string
   detalle?: string
   dentro_perimetro?: boolean | null
-  fecha_venc?: string
   tipo?: 'PERSONAL'
   nombre?: string
   cuil?: string
   vigencia_hasta?: string
-  establecimientos?: { id: string; nombre: string }[]
 }
 
 type RegistroAcceso = {
@@ -28,11 +26,9 @@ type RegistroAcceso = {
   tipo: string
   created_at: string
   es_excepcion?: boolean
-  autorizado_por?: string
-  justificacion?: string
-  habilitaciones?: { proveedores?: { razon_social: string; cuit: string } }
-  personal_nombre?: string
-  personal_cuil?: string
+  excepcion_autorizado_por?: string
+  excepcion_justificacion?: string
+  habilitaciones?: { proveedores?: { razon_social: string; cuit: string } } | null
 }
 
 const motivoLabel: Record<string, string> = {
@@ -49,68 +45,69 @@ const motivoLabel: Record<string, string> = {
 }
 
 export default function AccesoOperadorPage() {
-  const [vista, setVista]                 = useState<Vista>('dashboard')
+  const [vista, setVista]               = useState<Vista>('dashboard')
   const [establecimientos, setEstablecimientos] = useState<any[]>([])
   const [estabSeleccionado, setEstabSeleccionado] = useState('')
-  const [qrInput, setQrInput]             = useState('')
-  const [qrToken, setQrToken]             = useState('')
-  const [resultado, setResultado]         = useState<Resultado | null>(null)
-  const [loading, setLoading]             = useState(false)
-  const [tipoAccion, setTipoAccion]       = useState<'INGRESO' | 'EGRESO'>('INGRESO')
-  const [modoEntrada, setModoEntrada]     = useState<'camara' | 'manual'>('camara')
+  const [qrInput, setQrInput]           = useState('')
+  const [qrToken, setQrToken]           = useState('')
+  const [resultado, setResultado]       = useState<Resultado | null>(null)
+  const [loading, setLoading]           = useState(false)
+  const [tipoAccion, setTipoAccion]     = useState<'INGRESO' | 'EGRESO'>('INGRESO')
+  const [modoEntrada, setModoEntrada]   = useState<'camara' | 'manual'>('camara')
   const [mostrarExcepcion, setMostrarExcepcion] = useState(false)
-  const [excepcionOk, setExcepcionOk]     = useState<{ razon_social: string; autorizado_por: string } | null>(null)
+  const [excepcionOk, setExcepcionOk]   = useState<{ razon_social: string; autorizado_por: string } | null>(null)
 
-  // Stats del día
   const [ingresosHoy, setIngresosHoy]     = useState(0)
   const [egresosHoy, setEgresosHoy]       = useState(0)
   const [excepcionesHoy, setExcepcionesHoy] = useState(0)
   const [historial, setHistorial]         = useState<RegistroAcceso[]>([])
-  const [excepciones, setExcepciones]     = useState<any[]>([])
+  const [excepciones, setExcepciones]     = useState<RegistroAcceso[]>([])
   const [loadingData, setLoadingData]     = useState(true)
 
   const hoyStr = new Date().toISOString().split('T')[0]
 
   useEffect(() => {
-    supabase.from('establecimientos')
+    // Cargar establecimientos
+    supabase
+      .from('establecimientos')
       .select('id, nombre, modo_acceso, tipos_establecimiento(icono, nombre)')
       .eq('activo', true)
       .in('modo_acceso', ['OPERADOR', 'AMBOS'])
       .then(({ data }) => {
-        if (data) setEstablecimientos(data)
-        if (data?.length === 1) setEstabSeleccionado(data[0].id)
+        if (data) {
+          setEstablecimientos(data)
+          if (data.length === 1) setEstabSeleccionado(data[0].id)
+        }
       })
+      .catch(() => {})
+
     cargarStats()
   }, [])
 
   async function cargarStats() {
     setLoadingData(true)
-    const hoyStart = `${hoyStr}T00:00:00`
-    const hoyEnd   = `${hoyStr}T23:59:59`
+    try {
+      const hoyStart = `${hoyStr}T00:00:00`
+      const hoyEnd   = `${hoyStr}T23:59:59`
 
-    // Accesos del día
-    const { data: accesos } = await supabase
-      .from('registros_acceso')
-      .select(`id, tipo, created_at, habilitaciones(proveedores(razon_social, cuit))`)
-      .gte('created_at', hoyStart)
-      .lte('created_at', hoyEnd)
-      .order('created_at', { ascending: false })
+      const { data: accesos } = await supabase
+        .from('registros_acceso')
+        .select('id, tipo, created_at, es_excepcion, excepcion_autorizado_por, excepcion_justificacion, habilitaciones(proveedores(razon_social, cuit))')
+        .gte('created_at', hoyStart)
+        .lte('created_at', hoyEnd)
+        .order('created_at', { ascending: false })
+        .limit(100)
 
-    setIngresosHoy((accesos ?? []).filter(a => a.tipo === 'INGRESO').length)
-    setEgresosHoy((accesos ?? []).filter(a => a.tipo === 'EGRESO').length)
-    setHistorial((accesos ?? []) as RegistroAcceso[])
-
-    // Excepciones del día
-    const { data: excs } = await supabase
-      .from('registros_acceso')
-      .select(`id, tipo, created_at, autorizado_por, justificacion, habilitaciones(proveedores(razon_social, cuit))`)
-      .eq('es_excepcion', true)
-      .gte('created_at', hoyStart)
-      .lte('created_at', hoyEnd)
-      .order('created_at', { ascending: false })
-
-    setExcepcionesHoy((excs ?? []).length)
-    setExcepciones(excs ?? [])
+      const lista = (accesos ?? []) as RegistroAcceso[]
+      setIngresosHoy(lista.filter(a => a.tipo === 'INGRESO' && !a.es_excepcion).length)
+      setEgresosHoy(lista.filter(a => a.tipo === 'EGRESO').length)
+      const excs = lista.filter(a => a.es_excepcion)
+      setExcepcionesHoy(excs.length)
+      setHistorial(lista)
+      setExcepciones(excs)
+    } catch {
+      // silencioso — no romper la página si falla
+    }
     setLoadingData(false)
   }
 
@@ -150,38 +147,42 @@ export default function AccesoOperadorPage() {
                 : qr.trim()
     setQrToken(token)
 
-    // Paso 1: intentar personal habilitado
-    const { data: resPersonal } = await supabase.rpc('validar_qr_personal', {
-      p_qr_token:           token,
-      p_establecimiento_id: estabSeleccionado,
-    })
-    if (resPersonal && resPersonal.nombre !== undefined) {
-      setResultado(resPersonal as Resultado)
-      setLoading(false)
-      return
-    }
+    try {
+      // Paso 1: intentar personal habilitado
+      const { data: resPersonal } = await supabase.rpc('validar_qr_personal', {
+        p_qr_token:           token,
+        p_establecimiento_id: estabSeleccionado,
+      })
+      if (resPersonal && resPersonal.nombre !== undefined) {
+        setResultado(resPersonal as Resultado)
+        setLoading(false)
+        return
+      }
 
-    // Paso 2: proveedor
-    const gps = await obtenerGPS()
-    if (tipoAccion === 'INGRESO') {
-      const { data } = await supabase.rpc('validar_acceso', {
-        p_qr_token_proveedor: token,
-        p_establecimiento_id: estabSeleccionado,
-        p_lat:  gps?.lat ?? null,
-        p_lng:  gps?.lng ?? null,
-      })
-      setResultado(data)
-    } else {
-      const { data } = await supabase.rpc('registrar_egreso', {
-        p_qr_token_proveedor: token,
-        p_establecimiento_id: estabSeleccionado,
-        p_lat:  gps?.lat ?? null,
-        p_lng:  gps?.lng ?? null,
-      })
-      setResultado(data?.ok
-        ? { valido: true, razon_social: 'Egreso registrado' }
-        : { valido: false, motivo: data?.error }
-      )
+      // Paso 2: proveedor
+      const gps = await obtenerGPS()
+      if (tipoAccion === 'INGRESO') {
+        const { data } = await supabase.rpc('validar_acceso', {
+          p_qr_token_proveedor: token,
+          p_establecimiento_id: estabSeleccionado,
+          p_lat:  gps?.lat ?? null,
+          p_lng:  gps?.lng ?? null,
+        })
+        setResultado(data)
+      } else {
+        const { data } = await supabase.rpc('registrar_egreso', {
+          p_qr_token_proveedor: token,
+          p_establecimiento_id: estabSeleccionado,
+          p_lat:  gps?.lat ?? null,
+          p_lng:  gps?.lng ?? null,
+        })
+        setResultado(data?.ok
+          ? { valido: true, razon_social: 'Egreso registrado' }
+          : { valido: false, motivo: data?.error }
+        )
+      }
+    } catch {
+      setResultado({ valido: false, motivo: 'Error al validar QR' })
     }
     setLoading(false)
   }
@@ -207,7 +208,6 @@ export default function AccesoOperadorPage() {
   if (vista === 'dashboard') {
     return (
       <div className="min-h-screen bg-[#0f1117] text-white flex flex-col">
-        {/* Header */}
         <div className="border-b border-white/[0.06] px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 bg-blue-500 rounded flex items-center justify-center">
@@ -228,7 +228,7 @@ export default function AccesoOperadorPage() {
 
         <div className="flex-1 flex flex-col max-w-sm mx-auto w-full px-4 py-5 gap-4">
 
-          {/* Establecimiento selector */}
+          {/* Establecimiento */}
           <div>
             <label className="block text-zinc-500 text-xs mb-1.5">Establecimiento</label>
             <select value={estabSeleccionado} onChange={e => setEstabSeleccionado(e.target.value)}
@@ -250,96 +250,74 @@ export default function AccesoOperadorPage() {
               <p className="text-3xl font-bold text-red-400">{loadingData ? '–' : egresosHoy}</p>
               <p className="text-red-400/70 text-xs mt-1">Egresos</p>
             </div>
-            <div className={`border rounded-2xl p-4 text-center ${
-              excepcionesHoy > 0
-                ? 'bg-amber-500/10 border-amber-500/30'
-                : 'bg-white/[0.03] border-white/[0.08]'
-            }`}>
+            <div className={`border rounded-2xl p-4 text-center ${excepcionesHoy > 0 ? 'bg-amber-500/10 border-amber-500/30' : 'bg-white/[0.03] border-white/[0.08]'}`}>
               <p className={`text-3xl font-bold ${excepcionesHoy > 0 ? 'text-amber-400' : 'text-zinc-500'}`}>
                 {loadingData ? '–' : excepcionesHoy}
               </p>
-              <p className={`text-xs mt-1 ${excepcionesHoy > 0 ? 'text-amber-400/70' : 'text-zinc-600'}`}>
-                Excepciones
-              </p>
+              <p className={`text-xs mt-1 ${excepcionesHoy > 0 ? 'text-amber-400/70' : 'text-zinc-600'}`}>Excepciones</p>
             </div>
           </div>
 
-          {/* Botones principales */}
-          <div className="grid grid-cols-1 gap-3">
-            {/* Escanear QR — botón grande principal */}
-            <button
-              onClick={() => { if (estabSeleccionado) setVista('scanner') }}
-              disabled={!estabSeleccionado}
-              className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-2xl py-5 text-lg transition-all active:scale-95 flex items-center justify-center gap-3"
-            >
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/>
-                <rect x="7" y="7" width="3" height="3" rx="0.5"/>
-                <rect x="14" y="7" width="3" height="3" rx="0.5"/>
-                <rect x="7" y="14" width="3" height="3" rx="0.5"/>
-                <path d="M14 14h1v1m2-1h1v3h-3v-1"/>
+          {/* Botón principal */}
+          <button
+            onClick={() => { if (estabSeleccionado) setVista('scanner') }}
+            disabled={!estabSeleccionado}
+            className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-2xl py-5 text-lg transition-all active:scale-95 flex items-center justify-center gap-3"
+          >
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/>
+              <rect x="7" y="7" width="3" height="3" rx="0.5"/>
+              <rect x="14" y="7" width="3" height="3" rx="0.5"/>
+              <rect x="7" y="14" width="3" height="3" rx="0.5"/>
+              <path d="M14 14h1v1m2-1h1v3h-3v-1"/>
+            </svg>
+            Escanear QR
+          </button>
+
+          {/* Botones secundarios */}
+          <div className="grid grid-cols-2 gap-3">
+            <button onClick={() => setVista('historial')}
+              className="bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] rounded-2xl py-4 text-sm font-medium text-zinc-300 transition-all active:scale-95 flex flex-col items-center gap-2">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="9"/>
               </svg>
-              Escanear QR
+              Historial
+              {historial.length > 0 && <span className="text-xs text-zinc-500">{historial.length} hoy</span>}
             </button>
 
-            {/* Historial y Excepciones — fila */}
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={() => setVista('historial')}
-                className="bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] rounded-2xl py-4 text-sm font-medium text-zinc-300 transition-all active:scale-95 flex flex-col items-center gap-2"
-              >
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                  <path d="M12 8v4l3 3"/>
-                  <circle cx="12" cy="12" r="9"/>
-                </svg>
-                Historial
-                {historial.length > 0 && (
-                  <span className="text-xs text-zinc-500">{historial.length} hoy</span>
-                )}
-              </button>
-
-              <button
-                onClick={() => setVista('excepciones')}
-                className={`rounded-2xl py-4 text-sm font-medium transition-all active:scale-95 flex flex-col items-center gap-2 border ${
-                  excepcionesHoy > 0
-                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
-                    : 'bg-white/[0.04] border-white/[0.08] text-zinc-300 hover:bg-white/[0.08]'
-                }`}
-              >
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-                </svg>
-                Excepciones
-                {excepcionesHoy > 0 && (
-                  <span className="text-xs text-amber-400/70">{excepcionesHoy} hoy</span>
-                )}
-              </button>
-            </div>
+            <button onClick={() => setVista('excepciones')}
+              className={`rounded-2xl py-4 text-sm font-medium transition-all active:scale-95 flex flex-col items-center gap-2 border ${
+                excepcionesHoy > 0
+                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                  : 'bg-white/[0.04] border-white/[0.08] text-zinc-300 hover:bg-white/[0.08]'
+              }`}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+              Excepciones
+              {excepcionesHoy > 0 && <span className="text-xs text-amber-400/70">{excepcionesHoy} hoy</span>}
+            </button>
           </div>
 
-          {/* Últimos 3 registros del día */}
+          {/* Últimos 3 registros */}
           {historial.length > 0 && (
             <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
               <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
-                <p className="text-xs font-medium text-zinc-400">Últimos registros de hoy</p>
-                <button onClick={() => setVista('historial')} className="text-xs text-blue-400 hover:text-blue-300">
-                  Ver todos →
-                </button>
+                <p className="text-xs font-medium text-zinc-400">Últimos registros</p>
+                <button onClick={() => setVista('historial')} className="text-xs text-blue-400 hover:text-blue-300">Ver todos →</button>
               </div>
               <div className="divide-y divide-white/[0.04]">
                 {historial.slice(0, 3).map(r => {
                   const prov = (r.habilitaciones as any)?.proveedores
                   return (
                     <div key={r.id} className="px-4 py-3 flex items-center gap-3">
-                      <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs font-bold ${
-                        r.tipo === 'INGRESO' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
-                      }`}>
+                      <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs font-bold ${r.tipo === 'INGRESO' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
                         {r.tipo === 'INGRESO' ? '↓' : '↑'}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-white text-sm truncate">{prov?.razon_social ?? '—'}</p>
-                        <p className="text-zinc-600 text-xs">{r.tipo === 'INGRESO' ? 'Ingreso' : 'Egreso'}</p>
+                        <p className="text-zinc-600 text-xs">{r.tipo}</p>
                       </div>
                       <span className="text-zinc-600 text-xs shrink-0">
                         {new Date(r.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
@@ -363,21 +341,19 @@ export default function AccesoOperadorPage() {
   if (vista === 'scanner') {
     return (
       <div className="min-h-screen bg-[#0f1117] text-white flex flex-col">
-        {/* Header */}
         <div className="border-b border-white/[0.06] px-4 py-3 flex items-center gap-3">
-          <button onClick={volverDashboard} className="text-zinc-400 hover:text-white transition-colors p-1 -ml-1">
+          <button onClick={volverDashboard} className="text-zinc-400 hover:text-white p-1 -ml-1">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M19 12H5M12 19l-7-7 7-7"/>
             </svg>
           </button>
           <span className="font-medium text-sm">Escanear QR</span>
-          <span className="text-zinc-500 text-xs ml-auto">
+          <span className="text-zinc-500 text-xs ml-auto truncate max-w-[140px]">
             {establecimientos.find(e => e.id === estabSeleccionado)?.nombre}
           </span>
         </div>
 
         <div className="flex-1 flex flex-col items-center max-w-sm mx-auto w-full px-4 pt-4 gap-4">
-
           {/* Toggle Ingreso/Egreso */}
           <div className="flex gap-1 w-full bg-white/[0.03] border border-white/[0.06] rounded-xl p-1">
             <button onClick={() => setTipoAccion('INGRESO')}
@@ -392,26 +368,14 @@ export default function AccesoOperadorPage() {
 
           {/* Toggle cámara/manual */}
           <div className="flex gap-2 w-full">
-            <button onClick={() => setModoEntrada('camara')}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium border transition-all ${
-                modoEntrada === 'camara' ? 'bg-white/[0.08] text-white border-white/[0.15]' : 'text-zinc-500 border-white/[0.06] hover:text-zinc-300'
-              }`}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-                <circle cx="12" cy="13" r="4"/>
-              </svg>
-              Cámara
-            </button>
-            <button onClick={() => setModoEntrada('manual')}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium border transition-all ${
-                modoEntrada === 'manual' ? 'bg-white/[0.08] text-white border-white/[0.15]' : 'text-zinc-500 border-white/[0.06] hover:text-zinc-300'
-              }`}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
-                <rect x="3" y="14" width="7" height="7"/>
-              </svg>
-              Manual
-            </button>
+            {(['camara', 'manual'] as const).map(modo => (
+              <button key={modo} onClick={() => setModoEntrada(modo)}
+                className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium border transition-all ${
+                  modoEntrada === modo ? 'bg-white/[0.08] text-white border-white/[0.15]' : 'text-zinc-500 border-white/[0.06] hover:text-zinc-300'
+                }`}>
+                {modo === 'camara' ? '📷' : '⌨️'} {modo === 'camara' ? 'Cámara' : 'Manual'}
+              </button>
+            ))}
           </div>
 
           {/* Scanner o resultado */}
@@ -435,109 +399,75 @@ export default function AccesoOperadorPage() {
                 </form>
               )}
             </>
-          ) : (
-            // ── Resultado personal ──
-            esPersonal ? (
-              <div className={`w-full rounded-2xl p-6 text-center border ${resultado.valido ? 'bg-blue-500/5 border-blue-500/30' : 'bg-red-500/5 border-red-500/30'}`}>
-                <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3 ${resultado.valido ? 'bg-blue-500/10' : 'bg-red-500/10'}`}>
-                  {resultado.valido ? (
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2">
-                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
-                    </svg>
-                  ) : (
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
-                      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                    </svg>
-                  )}
-                </div>
-                <span className="inline-flex items-center gap-1 bg-blue-500/10 border border-blue-500/20 text-blue-300 text-xs px-3 py-1 rounded-full mb-3">
-                  🪪 Personal habilitado
-                </span>
-                <h2 className={`text-xl font-semibold mb-1 ${resultado.valido ? 'text-blue-300' : 'text-red-400'}`}>
-                  {resultado.valido ? 'Acceso habilitado' : 'Acceso denegado'}
-                </h2>
-                {resultado.nombre && <p className="text-white font-bold text-2xl mt-2">{resultado.nombre}</p>}
-                {resultado.cuil  && <p className="text-zinc-400 text-base font-mono mt-1">CUIL {resultado.cuil}</p>}
-                {resultado.valido && resultado.vigencia_hasta && (
-                  <p className="text-blue-400/70 text-xs mt-2">
-                    Vigente hasta {new Date(resultado.vigencia_hasta + 'T12:00:00').toLocaleDateString('es-AR')}
-                  </p>
-                )}
-                {!resultado.valido && resultado.motivo && (
-                  <div className="mt-3 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2">
-                    <p className="text-red-300 text-sm">{motivoLabel[resultado.motivo] ?? resultado.motivo}</p>
-                  </div>
-                )}
-                {resultado.valido
-                  ? <p className="text-zinc-700 text-xs mt-4">Se cierra en 5 segundos...</p>
-                  : <button onClick={resetearScanner} className="mt-3 text-zinc-600 hover:text-zinc-400 text-xs">Escanear otro</button>
-                }
+          ) : esPersonal ? (
+            /* Resultado personal */
+            <div className={`w-full rounded-2xl p-6 text-center border ${resultado.valido ? 'bg-blue-500/5 border-blue-500/30' : 'bg-red-500/5 border-red-500/30'}`}>
+              <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3 ${resultado.valido ? 'bg-blue-500/10' : 'bg-red-500/10'}`}>
+                <span className="text-3xl">{resultado.valido ? '👤' : '✗'}</span>
               </div>
-            ) : (
-              // ── Resultado proveedor ──
-              <>
-                <div className={`w-full rounded-2xl p-6 text-center border ${resultado.valido ? 'bg-green-500/5 border-green-500/30' : 'bg-red-500/5 border-red-500/30'}`}>
-                  <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${resultado.valido ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
-                    {resultado.valido ? (
-                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5">
-                        <polyline points="20,6 9,17 4,12"/>
-                      </svg>
-                    ) : (
-                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5">
-                        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                      </svg>
-                    )}
-                  </div>
-                  <h2 className={`text-xl font-semibold mb-2 ${resultado.valido ? 'text-green-400' : 'text-red-400'}`}>
-                    {resultado.valido
-                      ? (tipoAccion === 'INGRESO' ? 'Ingreso autorizado' : 'Egreso registrado')
-                      : 'Acceso denegado'}
-                  </h2>
-                  {resultado.razon_social && resultado.razon_social !== 'Egreso registrado' && (
-                    <p className="text-white font-medium text-lg">{resultado.razon_social}</p>
-                  )}
-                  {resultado.cuit && <p className="text-zinc-400 text-sm">CUIT {resultado.cuit}</p>}
-                  {!resultado.valido && resultado.motivo && (
-                    <div className="mt-3 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2">
-                      <p className="text-red-300 text-sm font-medium">{motivoLabel[resultado.motivo] ?? resultado.motivo}</p>
-                    </div>
-                  )}
-                  {resultado.valido && resultado.dentro_perimetro === false && (
-                    <div className="mt-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-4 py-2">
-                      <p className="text-yellow-400 text-xs">⚠ GPS fuera del perímetro</p>
-                    </div>
-                  )}
-                  {!resultado.valido && tipoAccion === 'INGRESO' && (
-                    <button onClick={() => setMostrarExcepcion(true)}
-                      className="mt-4 w-full bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-sm font-medium py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                        <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-                      </svg>
-                      Registrar excepción
-                    </button>
-                  )}
-                  {resultado.valido
-                    ? <p className="text-zinc-700 text-xs mt-4">Se cierra en 5 segundos...</p>
-                    : <button onClick={resetearScanner} className="mt-3 text-zinc-600 hover:text-zinc-400 text-xs">Escanear otro</button>
-                  }
+              <span className="inline-flex items-center gap-1 bg-blue-500/10 border border-blue-500/20 text-blue-300 text-xs px-3 py-1 rounded-full mb-3">
+                🪪 Personal habilitado
+              </span>
+              <h2 className={`text-xl font-semibold mb-1 ${resultado.valido ? 'text-blue-300' : 'text-red-400'}`}>
+                {resultado.valido ? 'Acceso habilitado' : 'Acceso denegado'}
+              </h2>
+              {resultado.nombre && <p className="text-white font-bold text-2xl mt-2">{resultado.nombre}</p>}
+              {resultado.cuil  && <p className="text-zinc-400 font-mono mt-1">CUIL {resultado.cuil}</p>}
+              {resultado.valido && resultado.vigencia_hasta && (
+                <p className="text-blue-400/70 text-xs mt-2">
+                  Vigente hasta {new Date(resultado.vigencia_hasta + 'T12:00:00').toLocaleDateString('es-AR')}
+                </p>
+              )}
+              {!resultado.valido && resultado.motivo && (
+                <div className="mt-3 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2">
+                  <p className="text-red-300 text-sm">{motivoLabel[resultado.motivo] ?? resultado.motivo}</p>
                 </div>
-
-                {/* Excepción ok */}
-                {excepcionOk && (
-                  <div className="w-full rounded-2xl p-5 text-center border bg-amber-500/5 border-amber-500/30">
-                    <p className="text-amber-300 font-semibold">Excepción registrada</p>
-                    <p className="text-white text-sm mt-1">{excepcionOk.razon_social}</p>
-                    <p className="text-zinc-500 text-xs mt-1">Autorizado: {excepcionOk.autorizado_por}</p>
-                    <button onClick={resetearScanner} className="mt-3 text-zinc-600 hover:text-zinc-400 text-xs">Escanear otro</button>
-                  </div>
-                )}
-              </>
-            )
+              )}
+              {resultado.valido
+                ? <p className="text-zinc-700 text-xs mt-4">Se cierra en 5 segundos...</p>
+                : <button onClick={resetearScanner} className="mt-3 text-zinc-600 hover:text-zinc-400 text-xs">Escanear otro</button>
+              }
+            </div>
+          ) : (
+            /* Resultado proveedor */
+            <div className={`w-full rounded-2xl p-6 text-center border ${resultado.valido ? 'bg-green-500/5 border-green-500/30' : 'bg-red-500/5 border-red-500/30'}`}>
+              <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl ${resultado.valido ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+                {resultado.valido ? '✓' : '✗'}
+              </div>
+              <h2 className={`text-xl font-semibold mb-2 ${resultado.valido ? 'text-green-400' : 'text-red-400'}`}>
+                {resultado.valido
+                  ? (tipoAccion === 'INGRESO' ? 'Ingreso autorizado' : 'Egreso registrado')
+                  : 'Acceso denegado'}
+              </h2>
+              {resultado.razon_social && resultado.razon_social !== 'Egreso registrado' && (
+                <p className="text-white font-medium text-lg">{resultado.razon_social}</p>
+              )}
+              {resultado.cuit && <p className="text-zinc-400 text-sm">CUIT {resultado.cuit}</p>}
+              {!resultado.valido && resultado.motivo && (
+                <div className="mt-3 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2">
+                  <p className="text-red-300 text-sm font-medium">{motivoLabel[resultado.motivo] ?? resultado.motivo}</p>
+                </div>
+              )}
+              {!resultado.valido && tipoAccion === 'INGRESO' && (
+                <button onClick={() => setMostrarExcepcion(true)}
+                  className="mt-4 w-full bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-sm font-medium py-3 rounded-xl transition-colors">
+                  ⚠ Registrar excepción
+                </button>
+              )}
+              {excepcionOk && (
+                <div className="mt-4 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3">
+                  <p className="text-amber-300 text-sm font-medium">Excepción registrada</p>
+                  <p className="text-zinc-400 text-xs mt-1">Autorizado: {excepcionOk.autorizado_por}</p>
+                </div>
+              )}
+              {resultado.valido
+                ? <p className="text-zinc-700 text-xs mt-4">Se cierra en 5 segundos...</p>
+                : <button onClick={resetearScanner} className="mt-3 text-zinc-600 hover:text-zinc-400 text-xs">Escanear otro</button>
+              }
+            </div>
           )}
         </div>
 
-        {/* Modal excepción */}
         {mostrarExcepcion && resultado && (
           <ExcepcionAcceso
             qrToken={qrToken}
@@ -561,7 +491,7 @@ export default function AccesoOperadorPage() {
     return (
       <div className="min-h-screen bg-[#0f1117] text-white flex flex-col">
         <div className="border-b border-white/[0.06] px-4 py-3 flex items-center gap-3">
-          <button onClick={volverDashboard} className="text-zinc-400 hover:text-white transition-colors p-1 -ml-1">
+          <button onClick={volverDashboard} className="text-zinc-400 hover:text-white p-1 -ml-1">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M19 12H5M12 19l-7-7 7-7"/>
             </svg>
@@ -569,30 +499,29 @@ export default function AccesoOperadorPage() {
           <span className="font-medium text-sm">Historial de hoy</span>
           <span className="ml-auto text-zinc-500 text-xs">{historial.length} registros</span>
         </div>
-
         <div className="max-w-sm mx-auto w-full px-4 py-4">
           {historial.length === 0 ? (
-            <div className="text-center py-12">
-              <p className="text-zinc-500 text-sm">Sin registros por el momento</p>
-            </div>
+            <p className="text-zinc-500 text-sm text-center py-12">Sin registros por el momento</p>
           ) : (
             <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
               <div className="divide-y divide-white/[0.04]">
                 {historial.map(r => {
                   const prov = (r.habilitaciones as any)?.proveedores
-                  const hora = new Date(r.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
                   return (
                     <div key={r.id} className="px-4 py-3 flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-sm font-bold ${
-                        r.tipo === 'INGRESO' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
-                      }`}>
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 font-bold ${r.tipo === 'INGRESO' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
                         {r.tipo === 'INGRESO' ? '↓' : '↑'}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-white text-sm truncate">{prov?.razon_social ?? '—'}</p>
-                        <p className="text-zinc-600 text-xs">{r.tipo === 'INGRESO' ? 'Ingreso' : 'Egreso'}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-zinc-600 text-xs">{r.tipo}</p>
+                          {r.es_excepcion && <span className="text-amber-400 text-xs">⚠ excepción</span>}
+                        </div>
                       </div>
-                      <span className="text-zinc-500 text-xs shrink-0">{hora}</span>
+                      <span className="text-zinc-500 text-xs shrink-0">
+                        {new Date(r.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
                     </div>
                   )
                 })}
@@ -609,7 +538,7 @@ export default function AccesoOperadorPage() {
     return (
       <div className="min-h-screen bg-[#0f1117] text-white flex flex-col">
         <div className="border-b border-white/[0.06] px-4 py-3 flex items-center gap-3">
-          <button onClick={volverDashboard} className="text-zinc-400 hover:text-white transition-colors p-1 -ml-1">
+          <button onClick={volverDashboard} className="text-zinc-400 hover:text-white p-1 -ml-1">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M19 12H5M12 19l-7-7 7-7"/>
             </svg>
@@ -617,31 +546,31 @@ export default function AccesoOperadorPage() {
           <span className="font-medium text-sm">Excepciones de hoy</span>
           <span className="ml-auto text-zinc-500 text-xs">{excepciones.length} registros</span>
         </div>
-
         <div className="max-w-sm mx-auto w-full px-4 py-4">
           {excepciones.length === 0 ? (
             <div className="text-center py-12">
-              <div className="text-3xl mb-2">✅</div>
+              <div className="text-4xl mb-3">✅</div>
               <p className="text-zinc-500 text-sm">Sin excepciones hoy</p>
             </div>
           ) : (
             <div className="space-y-3">
-              {excepciones.map((exc: any) => {
-                const prov = exc.habilitaciones?.proveedores
-                const hora = new Date(exc.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+              {excepciones.map(exc => {
+                const prov = (exc.habilitaciones as any)?.proveedores
                 return (
                   <div key={exc.id} className="bg-amber-500/5 border border-amber-500/20 rounded-2xl p-4">
                     <div className="flex items-start justify-between mb-2">
                       <p className="text-white font-medium text-sm">{prov?.razon_social ?? '—'}</p>
-                      <span className="text-amber-400/70 text-xs shrink-0 ml-2">{hora}</span>
+                      <span className="text-amber-400/70 text-xs shrink-0 ml-2">
+                        {new Date(exc.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
                     </div>
-                    {exc.autorizado_por && (
+                    {exc.excepcion_autorizado_por && (
                       <p className="text-zinc-400 text-xs mb-1">
-                        Autorizado por: <span className="text-amber-300">{exc.autorizado_por}</span>
+                        Autorizado: <span className="text-amber-300">{exc.excepcion_autorizado_por}</span>
                       </p>
                     )}
-                    {exc.justificacion && (
-                      <p className="text-zinc-500 text-xs italic">"{exc.justificacion}"</p>
+                    {exc.excepcion_justificacion && (
+                      <p className="text-zinc-500 text-xs italic">"{exc.excepcion_justificacion}"</p>
                     )}
                   </div>
                 )
