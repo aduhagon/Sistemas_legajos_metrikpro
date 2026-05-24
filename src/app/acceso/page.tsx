@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase-client'
 import QRScanner from '@/components/QRScanner'
+import ExcepcionAcceso from '@/components/ExcepcionAcceso'
 
 type Resultado = {
   valido: boolean
@@ -18,11 +19,14 @@ export default function AccesoOperadorPage() {
   const [establecimientos, setEstablecimientos] = useState<any[]>([])
   const [estabSeleccionado, setEstabSeleccionado] = useState('')
   const [qrInput, setQrInput] = useState('')
+  const [qrToken, setQrToken] = useState('')   // token limpio del último QR procesado
   const [resultado, setResultado] = useState<Resultado | null>(null)
   const [loading, setLoading] = useState(false)
   const [tipoAccion, setTipoAccion] = useState<'INGRESO' | 'EGRESO'>('INGRESO')
   const [modoEntrada, setModoEntrada] = useState<'camara' | 'manual'>('camara')
   const [camaraActiva, setCamaraActiva] = useState(false)
+  const [mostrarExcepcion, setMostrarExcepcion] = useState(false)
+  const [excepcionOk, setExcepcionOk] = useState<{ razon_social: string; autorizado_por: string } | null>(null)
 
   useEffect(() => {
     supabase.from('establecimientos')
@@ -35,16 +39,19 @@ export default function AccesoOperadorPage() {
       })
   }, [])
 
+  // Auto-cerrar resultado normal (no excepción) después de 4 segundos
   useEffect(() => {
-    if (resultado) {
+    if (resultado && !mostrarExcepcion) {
       const t = setTimeout(() => {
         setResultado(null)
         setQrInput('')
+        setQrToken('')
+        setExcepcionOk(null)
         setCamaraActiva(modoEntrada === 'camara')
       }, 4000)
       return () => clearTimeout(t)
     }
-  }, [resultado, modoEntrada])
+  }, [resultado, mostrarExcepcion, modoEntrada])
 
   useEffect(() => {
     setCamaraActiva(modoEntrada === 'camara' && !!estabSeleccionado && !resultado)
@@ -65,9 +72,12 @@ export default function AccesoOperadorPage() {
     setLoading(true)
     setResultado(null)
     setCamaraActiva(false)
+    setMostrarExcepcion(false)
+    setExcepcionOk(null)
 
     const gps = await obtenerGPS()
     const token = qr.includes('/qr/') ? qr.split('/qr/').pop()! : qr.trim()
+    setQrToken(token)
 
     if (tipoAccion === 'INGRESO') {
       const { data } = await supabase.rpc('validar_acceso', {
@@ -89,13 +99,23 @@ export default function AccesoOperadorPage() {
     setLoading(false)
   }
 
+  function resetear() {
+    setResultado(null)
+    setQrInput('')
+    setQrToken('')
+    setExcepcionOk(null)
+    setMostrarExcepcion(false)
+    setCamaraActiva(modoEntrada === 'camara')
+  }
+
   const motivoLabel: Record<string, string> = {
-    RUBRO_NO_HABILITADO: 'Rubro no habilitado para este establecimiento',
+    RUBRO_NO_HABILITADO:  'Rubro no habilitado para este establecimiento',
     HABILITACION_VENCIDA: 'Habilitación vencida',
-    VENCIDA: 'Habilitación vencida',
-    SUSPENDIDA: 'Proveedor suspendido',
-    DOC_PENDIENTE: 'Documentación pendiente',
-    'QR no reconocido': 'QR no reconocido',
+    VENCIDA:              'Habilitación vencida',
+    SUSPENDIDA:           'Proveedor suspendido',
+    DOC_PENDIENTE:        'Documentación pendiente',
+    EQUIPOS_VENCIDOS:     'Equipos con documentación vencida',
+    'QR no reconocido':   'QR no reconocido',
   }
 
   return (
@@ -175,9 +195,7 @@ export default function AccesoOperadorPage() {
             {modoEntrada === 'camara' && (
               <div className="w-full">
                 <QRScanner activo={camaraActiva} onScan={procesarQR} />
-                {loading && (
-                  <p className="text-zinc-500 text-xs text-center mt-2">Validando...</p>
-                )}
+                {loading && <p className="text-zinc-500 text-xs text-center mt-2">Validando...</p>}
               </div>
             )}
 
@@ -196,8 +214,8 @@ export default function AccesoOperadorPage() {
           </>
         )}
 
-        {/* Resultado */}
-        {resultado && (
+        {/* ── RESULTADO ── */}
+        {resultado && !excepcionOk && (
           <div className={`w-full rounded-2xl p-6 text-center border ${
             resultado.valido ? 'bg-green-500/5 border-green-500/30' : 'bg-red-500/5 border-red-500/30'
           }`}>
@@ -214,15 +232,18 @@ export default function AccesoOperadorPage() {
                 </svg>
               )}
             </div>
+
             <h2 className={`text-xl font-semibold mb-2 ${resultado.valido ? 'text-green-400' : 'text-red-400'}`}>
               {resultado.valido
                 ? (tipoAccion === 'INGRESO' ? 'Ingreso autorizado' : 'Egreso registrado')
                 : 'Acceso denegado'}
             </h2>
+
             {resultado.razon_social && resultado.razon_social !== 'Egreso registrado' && (
               <p className="text-white font-medium text-lg">{resultado.razon_social}</p>
             )}
             {resultado.cuit && <p className="text-zinc-400 text-sm">CUIT {resultado.cuit}</p>}
+
             {!resultado.valido && resultado.motivo && (
               <div className="mt-3 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2">
                 <p className="text-red-300 text-sm font-medium">
@@ -231,16 +252,76 @@ export default function AccesoOperadorPage() {
                 {resultado.detalle && <p className="text-red-400 text-xs mt-1">{resultado.detalle}</p>}
               </div>
             )}
+
             {resultado.valido && resultado.dentro_perimetro === false && (
               <div className="mt-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-4 py-2">
                 <p className="text-yellow-400 text-xs">⚠ GPS fuera del perímetro — registrado con anomalía</p>
               </div>
             )}
-            <p className="text-zinc-700 text-xs mt-4">Se cierra en 4 segundos...</p>
+
+            {/* ── FUNC-001: Botón de excepción — solo en acceso denegado de INGRESO ── */}
+            {!resultado.valido && tipoAccion === 'INGRESO' && (
+              <button
+                onClick={() => setMostrarExcepcion(true)}
+                className="mt-4 w-full bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-sm font-medium py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                Registrar ingreso de excepción
+              </button>
+            )}
+
+            {resultado.valido && (
+              <p className="text-zinc-700 text-xs mt-4">Se cierra en 4 segundos...</p>
+            )}
+
+            {/* Botón cerrar manual para acceso denegado */}
+            {!resultado.valido && (
+              <button onClick={resetear}
+                className="mt-3 text-zinc-600 hover:text-zinc-400 text-xs transition-colors">
+                Escanear otro QR
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* ── CONFIRMACIÓN DE EXCEPCIÓN ── */}
+        {excepcionOk && (
+          <div className="w-full rounded-2xl p-6 text-center border bg-amber-500/5 border-amber-500/30">
+            <div className="w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center mx-auto mb-4">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2.5">
+                <polyline points="20,6 9,17 4,12"/>
+              </svg>
+            </div>
+            <h2 className="text-xl font-semibold text-amber-300 mb-1">Ingreso de excepción registrado</h2>
+            <p className="text-white font-medium">{excepcionOk.razon_social}</p>
+            <p className="text-zinc-400 text-sm mt-1">Autorizado por: <span className="text-amber-300">{excepcionOk.autorizado_por}</span></p>
+            <p className="text-zinc-600 text-xs mt-3">El supervisor fue notificado</p>
+            <button onClick={resetear} className="mt-4 text-zinc-500 hover:text-zinc-300 text-xs transition-colors">
+              Escanear otro QR
+            </button>
           </div>
         )}
 
       </div>
+
+      {/* ── MODAL DE EXCEPCIÓN — FUNC-001 ── */}
+      {mostrarExcepcion && resultado && (
+        <ExcepcionAcceso
+          qrToken={qrToken}
+          establecimientoId={estabSeleccionado}
+          motivoBloqueo={resultado.motivo ?? 'DESCONOCIDO'}
+          razonSocial={resultado.razon_social}
+          onExcepcionRegistrada={(data) => {
+            setMostrarExcepcion(false)
+            setExcepcionOk(data)
+            setResultado(null)
+          }}
+          onCancelar={() => setMostrarExcepcion(false)}
+        />
+      )}
     </div>
   )
 }
