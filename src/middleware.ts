@@ -66,7 +66,61 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // --- Supabase auth ---
+  // ============================================================
+  // SUPERADMIN — verificar ANTES de cualquier otra lógica de auth
+  // ============================================================
+  if (path.startsWith('/superadmin')) {
+    // Login público
+    if (path === '/superadmin/login') {
+      return NextResponse.next()
+    }
+
+    let saResponse = NextResponse.next({ request: { headers: request.headers } })
+
+    const saSupabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) { return request.cookies.get(name)?.value },
+          set(name: string, value: string, options: CookieOptions) {
+            request.cookies.set({ name, value, ...options })
+            saResponse = NextResponse.next({ request: { headers: request.headers } })
+            saResponse.cookies.set({ name, value, ...options })
+          },
+          remove(name: string, options: CookieOptions) {
+            request.cookies.set({ name, value: '', ...options })
+            saResponse = NextResponse.next({ request: { headers: request.headers } })
+            saResponse.cookies.set({ name, value: '', ...options })
+          },
+        },
+      }
+    )
+
+    const { data: { user: saUser } } = await saSupabase.auth.getUser()
+
+    if (!saUser) {
+      return NextResponse.redirect(new URL('/superadmin/login', request.url))
+    }
+
+    // Verificar rol superadmin con service_role (bypass RLS, sin importar módulo)
+    const checkUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/usuarios_metrikpro?user_id=eq.${saUser.id}&rol=eq.superadmin&activo=eq.true&select=id&limit=1`
+    const checkRes = await fetch(checkUrl, {
+      headers: {
+        apikey:        process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY!}`,
+      },
+    })
+    const saData = await checkRes.json()
+
+    if (!Array.isArray(saData) || saData.length === 0) {
+      return NextResponse.redirect(new URL('/superadmin/login', request.url))
+    }
+
+    return saResponse
+  }
+
+  // --- Supabase auth (resto del sistema) ---
   let response = NextResponse.next({ request: { headers: request.headers } })
 
   const supabase = createServerClient(
@@ -93,7 +147,7 @@ export async function middleware(request: NextRequest) {
 
   // Rutas públicas — no requieren sesión
   const rutasPublicas = [
-    '/',              // pantalla de selección proveedor/colaborador — siempre pública
+    '/',
     '/login',
     '/registro',
     '/auth',
@@ -126,7 +180,6 @@ export async function middleware(request: NextRequest) {
     const rol = usuarioData?.rol
 
     // Desde /login → redirigir según rol
-    // La raíz '/' es siempre pública (pantalla de selección proveedor/colaborador)
     if (path === '/login') {
       if (rol === 'operador_acceso') return NextResponse.redirect(new URL('/acceso', request.url))
       if (rol === 'auditor')         return NextResponse.redirect(new URL('/auditor', request.url))
@@ -134,7 +187,6 @@ export async function middleware(request: NextRequest) {
     }
 
     // operador_acceso solo puede estar en /acceso
-    // Si intenta ir a /dashboard, /auditor u otra ruta → volver a /acceso
     if (rol === 'operador_acceso' && !path.startsWith('/acceso')) {
       return NextResponse.redirect(new URL('/acceso', request.url))
     }
