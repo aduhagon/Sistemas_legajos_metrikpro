@@ -134,8 +134,7 @@ export default function UsuariosAdmin({
   }
 
   // ── Invitar usuario nuevo ────────────────────────────────────────────────
-  async function invitar(e: React.FormEvent) {
-    e.preventDefault()
+  async function invitar() {
     setLoading(true)
     setError('')
     setExito('')
@@ -273,13 +272,14 @@ export default function UsuariosAdmin({
   }
 
   // ── Formulario compartido (crear + editar) ───────────────────────────────
-  function FormUsuario({ onSubmit, modo }: { onSubmit: (e?: React.FormEvent) => void; modo: 'nuevo' | 'editar' }) {
+  function FormUsuario({ onSubmit, modo }: { onSubmit: () => void; modo: 'nuevo' | 'editar' }) {
     return (
       <div className="bg-white/[0.03] border border-blue-500/20 rounded-2xl p-6">
         <h3 className="text-sm font-medium mb-4">
           {modo === 'nuevo' ? 'Nuevo usuario interno' : `Editar — ${form.nombre}`}
         </h3>
         <form onSubmit={e => { e.preventDefault(); onSubmit() }} className="space-y-5">
+
 
           {/* Nombre + Email */}
           <div className="grid grid-cols-2 gap-3">
