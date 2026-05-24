@@ -39,19 +39,20 @@ export default function Navbar({ nombre, rol }: Props) {
     { href: '/dashboard/reportes', label: 'Reportes',  roles: ['admin', 'evaluador'] },
   ]
 
-  // UX-P-07: menú Admin reorganizado en dos grupos con separador visual
   // Grupo 1 — Configuración del sistema
   const adminLinksConfig = [
-    { href: '/dashboard/configuracion',          label: 'Configuración',    icono: '⚙️' },
-    { href: '/dashboard/admin/usuarios',         label: 'Usuarios internos', icono: '👥' },
+    { href: '/dashboard/configuracion',      label: 'Configuración',     icono: '⚙️' },
+    { href: '/dashboard/admin/usuarios',     label: 'Usuarios internos', icono: '👥' },
   ]
+
   // Grupo 2 — Catálogos y datos del sistema
   const adminLinksCatalogos = [
-    { href: '/dashboard/admin/rubros',           label: 'Rubros y documentos',       icono: '📄' },
-    { href: '/dashboard/admin/tipos',            label: 'Tipos de establecimiento',  icono: '🏢' },
-    { href: '/dashboard/admin/establecimientos', label: 'Establecimientos',          icono: '📍' },
-    { href: '/dashboard/admin/equipos',          label: 'Tipos de equipo',           icono: '🚗' },
-    { href: '/dashboard/admin/checklist',        label: 'Checklist de auditoría',    icono: '✅' },
+    { href: '/dashboard/admin/rubros',           label: 'Rubros y documentos',      icono: '📄' },
+    { href: '/dashboard/admin/tipos',            label: 'Tipos de establecimiento', icono: '🏢' },
+    { href: '/dashboard/admin/establecimientos', label: 'Establecimientos',         icono: '📍' },
+    { href: '/dashboard/admin/equipos',          label: 'Tipos de equipo',          icono: '🚗' },
+    { href: '/dashboard/admin/checklist',        label: 'Checklist de auditoría',   icono: '✅' },
+    { href: '/dashboard/admin/personal',         label: 'Personal habilitado',      icono: '🪪' },
   ]
 
   const adminLinks = [...adminLinksConfig, ...adminLinksCatalogos]
@@ -69,7 +70,8 @@ export default function Navbar({ nombre, rol }: Props) {
           activo
             ? 'bg-white/[0.06] text-white'
             : 'text-zinc-400 hover:bg-white/[0.04] hover:text-white'
-        }`}>
+        }`}
+      >
         <span className="text-base">{link.icono}</span>
         {link.label}
       </Link>
@@ -127,7 +129,7 @@ export default function Navbar({ nombre, rol }: Props) {
                 </button>
 
                 {adminOpen && (
-                  <div className="absolute top-full left-0 mt-1.5 w-60 bg-[#0f1117] border border-white/[0.1] rounded-xl shadow-xl overflow-hidden z-50">
+                  <div className="absolute top-full left-0 mt-1.5 w-64 bg-[#0f1117] border border-white/[0.1] rounded-xl shadow-xl overflow-hidden z-50">
 
                     {/* Grupo 1: Configuración */}
                     <div className="px-4 pt-3 pb-1">
