@@ -11,6 +11,7 @@ import AccionesRapidasLegajo from './AccionesRapidasLegajo'
 
 type Tab = 'documentos' | 'equipos' | 'auditorias' | 'historial'
 
+// Next.js 15: params y searchParams son Promises
 export default async function LegajoDetallePage({
   params,
   searchParams,
@@ -18,14 +19,15 @@ export default async function LegajoDetallePage({
   params: Promise<{ id: string }>
   searchParams: Promise<{ tab?: string }>
 }) {
+  // Await ambos antes de usar
   const { id } = await params
-  const { tab } = await searchParams
+  const { tab: tabParam } = await searchParams
 
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const tabActivo = (tab as Tab) ?? 'documentos'
+  const tabActivo = (tabParam as Tab) ?? 'documentos'
 
   const { data: proveedor } = await supabase
     .from('proveedores')
@@ -166,7 +168,6 @@ export default async function LegajoDetallePage({
           </p>
         </div>
 
-        {/* Acciones rápidas del header */}
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
           <AccionesRapidasLegajo
             proveedorId={proveedor.id}
@@ -213,7 +214,6 @@ export default async function LegajoDetallePage({
         </div>
       </div>
 
-      {/* Alerta docs obligatorios */}
       {obligatoriosSinCargar > 0 && proveedor.estado !== 'APROBADO' && (
         <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-xl px-4 py-3 mb-5 flex items-center gap-2">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#eab308" strokeWidth="2">
@@ -270,7 +270,6 @@ export default async function LegajoDetallePage({
                     </div>
                   </div>
 
-                  {/* Timestamps */}
                   <div className="flex items-center gap-4 mb-2 flex-wrap">
                     {doc.fecha_presentacion && (
                       <div className="flex items-center gap-1.5">
@@ -308,7 +307,6 @@ export default async function LegajoDetallePage({
                     <p className="text-orange-400 text-xs italic mb-2">"{doc.observaciones}"</p>
                   )}
 
-                  {/* NOTIF-001: proveedorId y docNombre para notificación de rechazo */}
                   <AccionesDocumento
                     docId={doc.id}
                     estado={doc.estado}
