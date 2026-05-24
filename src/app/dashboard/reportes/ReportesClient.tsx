@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import AuditoriasReportes from './AuditoriasReportes'
+import BtnRecordatorio from './BtnRecordatorio'
 
 type Props = {
   stats: { total: number; pendientes: number; enRevision: number; aprobados: number; rechazados: number; suspendidos: number }
@@ -443,16 +444,19 @@ export default function ReportesClient({
                 {vencidos.map((d: any) => {
                   const dias = Math.abs(diasHasta(d.fecha_venc))
                   return (
-                    <div key={d.id} className="px-5 py-3 flex items-center justify-between">
-                      <div>
+                    <div key={d.id} className="px-5 py-3 flex items-center justify-between gap-4">
+                      <div className="flex-1 min-w-0">
                         <Link href={`/dashboard/legajos/${d.proveedores?.id}`} className="text-white text-sm hover:text-blue-300 transition-colors font-medium">
                           {d.proveedores?.razon_social}
                         </Link>
                         <p className="text-zinc-500 text-xs">{d.documentos_requeridos?.nombre}</p>
                       </div>
-                      <div className="text-right">
-                        <p className="text-red-400 text-xs font-medium">Venció el {formatFechaVenc(d.fecha_venc)}</p>
-                        <p className="text-red-600 text-xs">hace {dias} día{dias !== 1 ? 's' : ''}</p>
+                      <div className="flex items-center gap-4 shrink-0">
+                        <BtnRecordatorio proveedorId={d.proveedores?.id} />
+                        <div className="text-right">
+                          <p className="text-red-400 text-xs font-medium">Venció el {formatFechaVenc(d.fecha_venc)}</p>
+                          <p className="text-red-600 text-xs">hace {dias} día{dias !== 1 ? 's' : ''}</p>
+                        </div>
                       </div>
                     </div>
                   )
@@ -470,18 +474,21 @@ export default function ReportesClient({
                 {vencimientosFiltrados.map((d: any) => {
                   const dias = diasHasta(d.fecha_venc)
                   return (
-                    <div key={d.id} className="px-5 py-3 flex items-center justify-between">
-                      <div>
+                    <div key={d.id} className="px-5 py-3 flex items-center justify-between gap-4">
+                      <div className="flex-1 min-w-0">
                         <Link href={`/dashboard/legajos/${d.proveedores?.id}`} className="text-white text-sm hover:text-blue-300 transition-colors font-medium">
                           {d.proveedores?.razon_social}
                         </Link>
                         <p className="text-zinc-500 text-xs">{d.documentos_requeridos?.nombre}</p>
                       </div>
-                      <div className="text-right">
-                        <p className="text-zinc-300 text-xs">{formatFechaVenc(d.fecha_venc)}</p>
-                        <p className={`text-xs font-medium ${dias === 0 ? 'text-red-400' : dias <= 7 ? 'text-red-400' : dias <= 15 ? 'text-orange-400' : 'text-yellow-400'}`}>
-                          {dias === 0 ? 'Vence hoy' : `en ${dias} día${dias !== 1 ? 's' : ''}`}
-                        </p>
+                      <div className="flex items-center gap-4 shrink-0">
+                        <BtnRecordatorio proveedorId={d.proveedores?.id} />
+                        <div className="text-right">
+                          <p className="text-zinc-300 text-xs">{formatFechaVenc(d.fecha_venc)}</p>
+                          <p className={`text-xs font-medium ${dias === 0 ? 'text-red-400' : dias <= 7 ? 'text-red-400' : dias <= 15 ? 'text-orange-400' : 'text-yellow-400'}`}>
+                            {dias === 0 ? 'Vence hoy' : `en ${dias} día${dias !== 1 ? 's' : ''}`}
+                          </p>
+                        </div>
                       </div>
                     </div>
                   )
@@ -501,18 +508,21 @@ export default function ReportesClient({
                   const equipo = d.equipos_contratista
                   const dias = Math.abs(diasHasta(d.fecha_venc))
                   return (
-                    <div key={d.id} className="px-5 py-3 flex items-center justify-between">
-                      <div>
+                    <div key={d.id} className="px-5 py-3 flex items-center justify-between gap-4">
+                      <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-zinc-400 text-xs">{equipo?.tipos_equipo?.icono}</span>
                           <span className="text-white text-sm font-medium font-mono">{equipo?.dominio}</span>
-                          <span className="text-zinc-500 text-xs">{equipo?.proveedores?.razon_social}</span>
+                          <Link href={`/dashboard/legajos/${equipo?.proveedores?.id}`} className="text-zinc-500 text-xs hover:text-blue-300 transition-colors">{equipo?.proveedores?.razon_social}</Link>
                         </div>
                         <p className="text-zinc-500 text-xs mt-0.5">{d.documentos_requeridos_equipo?.nombre}</p>
                       </div>
-                      <div className="text-right">
-                        <p className="text-red-400 text-xs font-medium">Venció el {formatFechaVenc(d.fecha_venc)}</p>
-                        <p className="text-red-600 text-xs">hace {dias} día{dias !== 1 ? 's' : ''}</p>
+                      <div className="flex items-center gap-4 shrink-0">
+                        <BtnRecordatorio proveedorId={equipo?.proveedores?.id} />
+                        <div className="text-right">
+                          <p className="text-red-400 text-xs font-medium">Venció el {formatFechaVenc(d.fecha_venc)}</p>
+                          <p className="text-red-600 text-xs">hace {dias} día{dias !== 1 ? 's' : ''}</p>
+                        </div>
                       </div>
                     </div>
                   )
@@ -531,20 +541,23 @@ export default function ReportesClient({
                   const equipo = d.equipos_contratista
                   const dias = diasHasta(d.fecha_venc)
                   return (
-                    <div key={d.id} className="px-5 py-3 flex items-center justify-between">
-                      <div>
+                    <div key={d.id} className="px-5 py-3 flex items-center justify-between gap-4">
+                      <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-zinc-400 text-xs">{equipo?.tipos_equipo?.icono}</span>
                           <span className="text-white text-sm font-medium font-mono">{equipo?.dominio}</span>
-                          <span className="text-zinc-500 text-xs">{equipo?.proveedores?.razon_social}</span>
+                          <Link href={`/dashboard/legajos/${equipo?.proveedores?.id}`} className="text-zinc-500 text-xs hover:text-blue-300 transition-colors">{equipo?.proveedores?.razon_social}</Link>
                         </div>
                         <p className="text-zinc-500 text-xs mt-0.5">{d.documentos_requeridos_equipo?.nombre}</p>
                       </div>
-                      <div className="text-right">
-                        <p className="text-zinc-300 text-xs">{formatFechaVenc(d.fecha_venc)}</p>
-                        <p className={`text-xs font-medium ${dias === 0 ? 'text-red-400' : dias <= 7 ? 'text-red-400' : dias <= 15 ? 'text-orange-400' : 'text-yellow-400'}`}>
-                          {dias === 0 ? 'Vence hoy' : `en ${dias} día${dias !== 1 ? 's' : ''}`}
-                        </p>
+                      <div className="flex items-center gap-4 shrink-0">
+                        <BtnRecordatorio proveedorId={equipo?.proveedores?.id} />
+                        <div className="text-right">
+                          <p className="text-zinc-300 text-xs">{formatFechaVenc(d.fecha_venc)}</p>
+                          <p className={`text-xs font-medium ${dias === 0 ? 'text-red-400' : dias <= 7 ? 'text-red-400' : dias <= 15 ? 'text-orange-400' : 'text-yellow-400'}`}>
+                            {dias === 0 ? 'Vence hoy' : `en ${dias} día${dias !== 1 ? 's' : ''}`}
+                          </p>
+                        </div>
                       </div>
                     </div>
                   )
