@@ -305,12 +305,14 @@ export default async function LegajoDetallePage({
                     <p className="text-orange-400 text-xs italic mb-2">"{doc.observaciones}"</p>
                   )}
 
-                  {/* Acciones directas — UX-P-06 */}
+                  {/* NOTIF-001: proveedorId y docNombre para notificación de rechazo */}
                   <AccionesDocumento
                     docId={doc.id}
                     estado={doc.estado}
                     fechaVencActual={doc.fecha_venc}
                     tipoVigencia={dr?.tipo_vigencia ?? 'ANUAL'}
+                    proveedorId={proveedor.id}
+                    docNombre={dr?.nombre ?? ''}
                   />
                 </div>
               )

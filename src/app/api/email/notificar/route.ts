@@ -5,7 +5,7 @@ import { getGrupoId } from '@/lib/grupo'
 
 export async function POST(req: Request) {
   try {
-    const { tipo, proveedor_id } = await req.json()
+    const { tipo, proveedor_id, doc_nombre, observaciones } = await req.json()
 
     const supabase = createClient()
     const grupoId = await getGrupoId()
@@ -100,7 +100,33 @@ export async function POST(req: Request) {
           <p style="color:#666">Revisá el sistema para ver las observaciones y subir la documentación corregida.</p>
         </div>`,
       },
-      // UX-P-03: nuevo template para recordatorio manual de vencimiento
+      // NOTIF-001: rechazo de documento individual con nombre y observación del evaluador
+      doc_rechazado: {
+        to: proveedor.email,
+        subject: `Documento rechazado — ${doc_nombre ?? 'Documento'} — ${proveedor.razon_social}`,
+        html: `<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px">
+          <h2 style="color:#7f1d1d">Documento rechazado</h2>
+          <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:20px;margin:16px 0">
+            <p style="margin:0;font-weight:600;color:#991b1b">${doc_nombre ?? 'Documento'}</p>
+            <p style="margin:6px 0 0;color:#dc2626;font-size:14px">${proveedor.razon_social}</p>
+          </div>
+          ${observaciones ? `
+          <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:16px;margin:0 0 16px">
+            <p style="margin:0 0 4px;font-size:11px;color:#9a3412;font-weight:700;text-transform:uppercase;letter-spacing:0.05em">Observación del evaluador</p>
+            <p style="margin:0;color:#c2410c;font-size:14px">${observaciones}</p>
+          </div>` : ''}
+          <p style="color:#666;font-size:14px">Ingresá al portal, corregí el documento y volvé a subirlo para que el evaluador lo revise nuevamente.</p>
+          <div style="margin-top:24px">
+            <a href="${process.env.NEXT_PUBLIC_SITE_URL ?? 'https://sistemas-legajos-metrikpro.vercel.app'}/proveedor/portal"
+               style="background:#2563eb;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">
+              Ir al portal a corregir →
+            </a>
+          </div>
+        </div>`,
+      },
+      // NOTIF-002: legajo aprobado — ya existe como 'aprobado' (enviar desde el evaluador al aprobar_proveedor)
+      // NOTIF-003: legajo rechazado — ya existe como 'rechazado' (enviar desde el evaluador al rechazar_proveedor)
+      // UX-P-03: recordatorio manual de vencimiento
       vencimiento_proximo: {
         to: proveedor.email,
         subject: `Documentación vencida o por vencer — ${proveedor.razon_social}`,

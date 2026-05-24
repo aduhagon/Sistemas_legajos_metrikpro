@@ -9,9 +9,13 @@ type Props = {
   estado: string
   fechaVencActual: string | null
   tipoVigencia: string
+  proveedorId: string       // NOTIF-001: necesario para enviar el email al proveedor correcto
+  docNombre: string         // NOTIF-001: nombre del documento para el email
 }
 
-export default function AccionesDocumento({ docId, estado, fechaVencActual, tipoVigencia }: Props) {
+export default function AccionesDocumento({
+  docId, estado, fechaVencActual, tipoVigencia, proveedorId, docNombre,
+}: Props) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [showObs, setShowObs] = useState(false)
@@ -39,8 +43,22 @@ export default function AccionesDocumento({ docId, estado, fechaVencActual, tipo
       p_evaluador_id: user?.id,
       p_observaciones: obs,
     })
+
+    // NOTIF-001: notificar al proveedor con nombre del documento y observación
+    fetch('/api/email/notificar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tipo: 'doc_rechazado',
+        proveedor_id: proveedorId,
+        doc_nombre: docNombre,
+        observaciones: obs,
+      }),
+    }).catch(() => {})
+
     setLoading(false)
     setShowObs(false)
+    setObs('')
     router.refresh()
   }
 
@@ -60,7 +78,7 @@ export default function AccionesDocumento({ docId, estado, fechaVencActual, tipo
   return (
     <div className="flex flex-col gap-2">
 
-      {/* Edición de fecha — disponible para evaluador siempre que no sea PERMANENTE */}
+      {/* Edición de fecha */}
       {necesitaFecha && (
         <div className="flex items-center gap-2">
           {editandoFecha ? (
@@ -96,19 +114,22 @@ export default function AccionesDocumento({ docId, estado, fechaVencActual, tipo
         </div>
       )}
 
-      {/* Acciones aprobar/rechazar — solo si está CARGADO */}
+      {/* Aprobar / Rechazar — solo si está CARGADO */}
       {estado === 'CARGADO' && (
         <>
           {showObs ? (
             <div className="flex items-center gap-2">
-              <input value={obs} onChange={e => setObs(e.target.value)}
+              <input
+                value={obs}
+                onChange={e => setObs(e.target.value)}
                 placeholder="Motivo del rechazo..."
-                className="bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:border-red-500/50 w-52"/>
+                className="bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:border-red-500/50 w-52"
+              />
               <button onClick={rechazarDoc} disabled={loading || !obs}
                 className="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-xs px-3 py-1.5 rounded-lg transition-all disabled:opacity-40">
                 Confirmar
               </button>
-              <button onClick={() => setShowObs(false)}
+              <button onClick={() => { setShowObs(false); setObs('') }}
                 className="text-zinc-500 hover:text-zinc-300 text-xs transition-colors">
                 Cancelar
               </button>
@@ -128,11 +149,9 @@ export default function AccionesDocumento({ docId, estado, fechaVencActual, tipo
         </>
       )}
 
-      {/* Si está APROBADO, permitir editar fecha igualmente */}
       {estado === 'APROBADO' && !necesitaFecha && (
         <span className="text-zinc-600 text-xs">Documento permanente — sin vencimiento</span>
       )}
-
     </div>
   )
 }
