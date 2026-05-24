@@ -16,6 +16,7 @@ type VisitaLocal = {
   checklist: { checklist_id: string; cumple: boolean; observacion: string }[]
   sincronizado: boolean
 }
+type EquipoVencido = { dominio: string; icono: string; tipo: string; doc_nombre: string; fecha_venc: string }
 
 const RESULTADO_COLOR: Record<string, string> = {
   CONFORME:    'bg-green-500/10 text-green-400 border-green-500/20',
@@ -30,7 +31,6 @@ const RESULTADO_LABEL: Record<string, string> = {
   OBSERVACION: '○ Observación',
 }
 
-// UX-H-03: mapeo de estados técnicos a lenguaje de negocio
 const ESTADO_HAB_LABEL: Record<string, string> = {
   VIGENTE:       'Vigente',
   DOC_PENDIENTE: 'Doc. pendiente',
@@ -50,7 +50,7 @@ function saveQueue(q: VisitaLocal[]) { localStorage.setItem(DB_KEY, JSON.stringi
 function getSnap(id: string): Snapshot | null { try { return JSON.parse(localStorage.getItem(SNAP_KEY(id)) || 'null') } catch { return null } }
 function saveSnap(id: string, snap: Snapshot) { localStorage.setItem(SNAP_KEY(id), JSON.stringify(snap)) }
 
-// ── Componente QR Scanner ────────────────────────────────────
+// ── QR Scanner ───────────────────────────────────────────────
 function QRScanner({ onScan, onClose }: { onScan: (token: string) => void; onClose: () => void }) {
   const videoRef  = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -86,15 +86,10 @@ function QRScanner({ onScan, onClose }: { onScan: (token: string) => void; onClo
   async function escanear() {
     const video  = videoRef.current
     const canvas = canvasRef.current
-    if (!video || !canvas || video.readyState < 2) {
-      rafRef.current = requestAnimationFrame(escanear)
-      return
-    }
-    canvas.width  = video.videoWidth
-    canvas.height = video.videoHeight
+    if (!video || !canvas || video.readyState < 2) { rafRef.current = requestAnimationFrame(escanear); return }
+    canvas.width = video.videoWidth; canvas.height = video.videoHeight
     const ctx = canvas.getContext('2d')!
     ctx.drawImage(video, 0, 0)
-
     if ('BarcodeDetector' in window) {
       try {
         // @ts-ignore
@@ -121,16 +116,12 @@ function QRScanner({ onScan, onClose }: { onScan: (token: string) => void; onClo
         <p style={{ color: '#fff', fontSize: 14, fontWeight: 500, margin: 0 }}>Escanear QR del proveedor</p>
         <button onClick={() => { detener(); onClose() }}
           style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', padding: 4 }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M18 6 6 18M6 6l12 12"/>
-          </svg>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
         </button>
       </div>
-
       <div style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <video ref={videoRef} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted playsInline autoPlay/>
         <canvas ref={canvasRef} style={{ display: 'none' }}/>
-
         {activo && (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
             <div style={{ position: 'relative', width: 256, height: 256 }}>
@@ -139,18 +130,11 @@ function QRScanner({ onScan, onClose }: { onScan: (token: string) => void; onClo
                 { top: 0, right: 0, borderTop: '2px solid #60a5fa', borderRight: '2px solid #60a5fa', borderRadius: '0 8px 0 0' },
                 { bottom: 0, left: 0, borderBottom: '2px solid #60a5fa', borderLeft: '2px solid #60a5fa', borderRadius: '0 0 0 8px' },
                 { bottom: 0, right: 0, borderBottom: '2px solid #60a5fa', borderRight: '2px solid #60a5fa', borderRadius: '0 0 8px 0' },
-              ].map((s, i) => (
-                <div key={i} style={{ position: 'absolute', width: 32, height: 32, ...s }}/>
-              ))}
-              <div style={{
-                position: 'absolute', left: 0, right: 0, height: 2, background: 'rgba(96,165,250,0.7)',
-                animation: 'scan 2s ease-in-out infinite alternate',
-                top: '50%',
-              }}/>
+              ].map((s, i) => <div key={i} style={{ position: 'absolute', width: 32, height: 32, ...s }}/>)}
+              <div style={{ position: 'absolute', left: 0, right: 0, height: 2, background: 'rgba(96,165,250,0.7)', animation: 'scan 2s ease-in-out infinite alternate', top: '50%' }}/>
             </div>
           </div>
         )}
-
         {error && (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
             <div style={{ background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 16, padding: 24, textAlign: 'center' }}>
@@ -163,12 +147,91 @@ function QRScanner({ onScan, onClose }: { onScan: (token: string) => void; onClo
           </div>
         )}
       </div>
-
       <p style={{ color: '#6b7280', fontSize: 12, textAlign: 'center', padding: '12px 0', background: '#000', margin: 0 }}>
         Apuntá la cámara al código QR del proveedor
       </p>
-
       <style>{`@keyframes scan { from { transform: translateY(-80px); opacity: 0.4; } to { transform: translateY(80px); opacity: 1; } }`}</style>
+    </div>
+  )
+}
+
+// ── Pantalla de bloqueo por equipos vencidos ─────────────────
+function PantallaBloqueoEquipos({
+  razonSocial, cuit, equipos, onVolver,
+}: {
+  razonSocial: string; cuit: string
+  equipos: EquipoVencido[]
+  onVolver: () => void
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <button onClick={onVolver} className="text-zinc-500 hover:text-white transition-colors">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M19 12H5m7-7-7 7 7 7"/>
+          </svg>
+        </button>
+        <p className="font-medium text-sm">{razonSocial}</p>
+      </div>
+
+      {/* Banner de bloqueo */}
+      <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-5 text-center">
+        <div className="w-14 h-14 bg-red-500/15 rounded-full flex items-center justify-center mx-auto mb-3">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#f87171" strokeWidth="1.5">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+          </svg>
+        </div>
+        <h2 className="text-red-300 font-semibold text-lg mb-1">Acceso bloqueado</h2>
+        <p className="text-red-400/80 text-sm">
+          Este proveedor tiene equipos con documentación vencida.
+        </p>
+        <p className="text-zinc-500 text-xs mt-1">CUIT {cuit}</p>
+      </div>
+
+      {/* Lista de equipos con problema */}
+      <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-white/[0.06]">
+          <p className="text-sm font-medium text-white">Equipos con documentación vencida</p>
+          <p className="text-zinc-500 text-xs mt-0.5">
+            {equipos.length} documento{equipos.length !== 1 ? 's' : ''} vencido{equipos.length !== 1 ? 's' : ''}
+          </p>
+        </div>
+        <div className="divide-y divide-white/[0.04]">
+          {equipos.map((eq, i) => (
+            <div key={i} className="px-4 py-3 flex items-start gap-3">
+              <span className="text-xl shrink-0 mt-0.5">{eq.icono}</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-white text-sm font-mono font-medium">{eq.dominio}</span>
+                  <span className="text-zinc-500 text-xs">{eq.tipo}</span>
+                </div>
+                <p className="text-zinc-400 text-xs mt-0.5">{eq.doc_nombre}</p>
+                {eq.fecha_venc && (
+                  <p className="text-orange-400 text-xs mt-0.5">
+                    Venció: {new Date(eq.fecha_venc + 'T12:00:00').toLocaleDateString('es-AR')}
+                  </p>
+                )}
+              </div>
+              <span className="text-xs px-2 py-0.5 rounded-full border bg-orange-500/10 text-orange-400 border-orange-500/20 shrink-0">
+                Vencido
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Instrucción */}
+      <div className="bg-white/[0.03] border border-white/[0.08] rounded-xl px-4 py-3">
+        <p className="text-zinc-400 text-sm">
+          El proveedor debe renovar la documentación de sus equipos antes de poder ingresar.
+        </p>
+      </div>
+
+      <button onClick={onVolver}
+        className="w-full bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 font-medium py-3 rounded-xl transition-colors text-sm">
+        ← Volver a escanear
+      </button>
     </div>
   )
 }
@@ -177,7 +240,7 @@ function QRScanner({ onScan, onClose }: { onScan: (token: string) => void; onClo
 export default function AuditorApp({ establecimientos, auditorId }: { establecimientos: Establecimiento[]; auditorId: string }) {
   const [online, setOnline]                 = useState(true)
   const [scannerAbierto, setScannerAbierto] = useState(false)
-  const [vista, setVista]                   = useState<'inicio'|'escanear'|'visita'|'cola'>('inicio')
+  const [vista, setVista]                   = useState<'inicio'|'escanear'|'visita'|'cola'|'bloqueo_equipos'>('inicio')
   const [estSeleccionado, setEst]           = useState<Establecimiento | null>(null)
   const [snapshot, setSnapshot]             = useState<Snapshot | null>(null)
   const [loadingSnap, setLoadingSnap]       = useState(false)
@@ -191,15 +254,14 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
   const [sincronizando, setSincronizando]   = useState(false)
   const [guardando, setGuardando]           = useState(false)
   const [msg, setMsg]                       = useState('')
+  const [validando, setValidando]           = useState(false)
+  const [equiposVencidos, setEquiposVencidos] = useState<EquipoVencido[]>([])
+  const [bloqueadoRazonSocial, setBloqueadoRazonSocial] = useState('')
+  const [bloqueadoCuit, setBloqueadoCuit]   = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // UX-P-08: contador de visitas registradas en la jornada actual
   const hoyStr = new Date().toISOString().split('T')[0]
-  const visitasHoy = cola.filter(v =>
-    v.visitado_at.startsWith(hoyStr) || v.sincronizado
-      ? v.visitado_at.startsWith(hoyStr)
-      : false
-  ).length
+  const visitasHoy = cola.filter(v => v.visitado_at.startsWith(hoyStr)).length
 
   useEffect(() => {
     const on  = () => { setOnline(true); sincronizarCola() }
@@ -242,8 +304,7 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
         }
       } catch {}
     }
-    saveQueue(nuevaQ)
-    setCola(nuevaQ)
+    saveQueue(nuevaQ); setCola(nuevaQ)
     setSincronizando(false)
     const n = nuevaQ.filter(v => v.sincronizado).length
     setMsg(`${n} visita(s) sincronizada(s)`)
@@ -270,10 +331,49 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
     setVista('escanear')
   }
 
+  // ── Validar acceso con equipos ───────────────────────────────
+  async function seleccionarProveedor(prov: ProveedorSnap) {
+    if (!estSeleccionado) return
+
+    // Sin conexión: no podemos validar equipos → entrar igual con aviso
+    if (!online) {
+      setProv(prov)
+      setVista('visita')
+      return
+    }
+
+    setValidando(true)
+    try {
+      const { data } = await supabase.rpc('validar_acceso', {
+        p_qr_token_proveedor:  prov.qr_token,
+        p_establecimiento_id:  estSeleccionado.id,
+      })
+
+      if (data?.motivo === 'EQUIPOS_VENCIDOS') {
+        setEquiposVencidos(data.equipos_vencidos ?? [])
+        setBloqueadoRazonSocial(data.razon_social ?? prov.razon_social)
+        setBloqueadoCuit(data.cuit ?? prov.cuit)
+        setVista('bloqueo_equipos')
+        setValidando(false)
+        return
+      }
+
+      // Para cualquier otro resultado (válido o motivo diferente), dejar pasar
+      // — los otros bloqueos (habilitacion vencida, rubro) ya se muestran en la pantalla de visita
+      setProv(prov)
+      setVista('visita')
+    } catch {
+      // Si la RPC falla, entrar de todas formas
+      setProv(prov)
+      setVista('visita')
+    }
+    setValidando(false)
+  }
+
   function buscarPorQR(token: string) {
     if (!snapshot) { setMsg('Snapshot no disponible'); setTimeout(() => setMsg(''), 3000); return }
     const prov = snapshot.proveedores?.find(p => p.qr_token === token)
-    if (prov) { setProv(prov); setVista('visita') }
+    if (prov) { seleccionarProveedor(prov) }
     else { setMsg('QR no encontrado en el snapshot.' + (online ? '' : ' Verificá con conexión.')); setTimeout(() => setMsg(''), 3000) }
   }
 
@@ -363,14 +463,13 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
 
       <div className="min-h-screen bg-[#0d0f17] text-white max-w-sm mx-auto px-4 py-6">
 
-        {/* Header — UX-P-08: contador de visitas del día */}
+        {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
             <p className="text-xs text-zinc-500 mb-0.5">Sistema Legajos</p>
             <h1 className="text-lg font-medium">App de auditoría</h1>
           </div>
           <div className="flex items-center gap-2">
-            {/* Contador visitas del día */}
             {estSeleccionado && (
               <div className="text-xs bg-white/[0.05] border border-white/[0.08] px-2.5 py-1 rounded-full text-zinc-400">
                 {visitasHoy} visita{visitasHoy !== 1 ? 's' : ''} hoy
@@ -382,8 +481,7 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
                 {pendientes} pendiente{pendientes > 1 ? 's' : ''}
               </button>
             )}
-            <div className={`w-2 h-2 rounded-full ${online ? 'bg-green-400' : 'bg-red-400'}`}
-              title={online ? 'Online' : 'Offline'}/>
+            <div className={`w-2 h-2 rounded-full ${online ? 'bg-green-400' : 'bg-red-400'}`}/>
           </div>
         </div>
 
@@ -391,6 +489,16 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
         {msg && (
           <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3 mb-4">
             <p className="text-blue-300 text-sm">{sincronizando ? '⟳ Sincronizando...' : msg}</p>
+          </div>
+        )}
+
+        {/* Spinner de validación */}
+        {validando && (
+          <div className="bg-white/[0.03] border border-white/[0.08] rounded-xl px-4 py-3 mb-4 flex items-center gap-3">
+            <svg className="animate-spin shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2">
+              <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+            </svg>
+            <p className="text-zinc-400 text-sm">Verificando documentación de equipos…</p>
           </div>
         )}
 
@@ -435,7 +543,6 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
               </div>
             </div>
 
-            {/* Botón cámara */}
             <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-4 space-y-3">
               <p className="text-zinc-400 text-xs font-medium uppercase tracking-wide">Escanear QR</p>
               <button onClick={() => setScannerAbierto(true)}
@@ -449,13 +556,11 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
                 </svg>
                 Abrir cámara y escanear QR
               </button>
-
               <div className="flex items-center gap-2">
                 <div className="flex-1 h-px bg-white/[0.06]"/>
                 <span className="text-zinc-600 text-xs">o ingresá el token manualmente</span>
                 <div className="flex-1 h-px bg-white/[0.06]"/>
               </div>
-
               <input value={qrInput} onChange={e => setQrInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && qrInput && buscarPorQR(qrInput)}
                 placeholder="Token QR del proveedor" className={inputCls}/>
@@ -467,7 +572,6 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
               )}
             </div>
 
-            {/* Lista de proveedores */}
             {snapshot?.proveedores && snapshot.proveedores.length > 0 && (
               <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
                 <p className="text-zinc-500 text-xs px-4 pt-3 pb-2 font-medium uppercase tracking-wide">
@@ -477,26 +581,21 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
                   {snapshot.proveedores.slice(0, 10).map(prov => {
                     const estadoHab = prov.habilitacion_estado ?? prov.estado
                     const esEnRevision = estadoHab === 'EN_REVISION'
-
                     return (
-                      <button key={prov.id} onClick={() => { setProv(prov); setVista('visita') }}
-                        className="w-full px-4 py-3 text-left hover:bg-white/[0.03] transition-colors">
+                      <button key={prov.id} onClick={() => seleccionarProveedor(prov)} disabled={validando}
+                        className="w-full px-4 py-3 text-left hover:bg-white/[0.03] transition-colors disabled:opacity-60">
                         <div className="flex items-center justify-between gap-3">
                           <div className="flex-1 min-w-0">
                             <p className="text-white text-sm">{prov.razon_social}</p>
                             <p className="text-zinc-600 text-xs">{prov.cuit}</p>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
-                            {/* UX-P-08: ícono de advertencia para EN_REVISION */}
                             {esEnRevision && (
-                              <span title="Documentación en revisión — consultar con supervisor antes de permitir ingreso">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#eab308" strokeWidth="2">
-                                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-                                </svg>
-                              </span>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#eab308" strokeWidth="2">
+                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                                <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                              </svg>
                             )}
-                            {/* UX-H-03: badge con texto formateado */}
                             <span className={`text-xs px-2 py-0.5 rounded-full border ${
                               estadoHab === 'VIGENTE'       ? 'bg-green-500/10 text-green-400 border-green-500/20' :
                               estadoHab === 'EN_REVISION'   ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
@@ -507,7 +606,6 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
                             </span>
                           </div>
                         </div>
-                        {/* UX-P-08: tooltip/aviso inline para EN_REVISION */}
                         {esEnRevision && (
                           <p className="text-yellow-600 text-xs mt-1.5 leading-relaxed">
                             ⚠ Documentación en revisión — consultá con supervisor antes de permitir el ingreso
@@ -522,6 +620,16 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
           </div>
         )}
 
+        {/* ── BLOQUEO POR EQUIPOS VENCIDOS ── */}
+        {vista === 'bloqueo_equipos' && (
+          <PantallaBloqueoEquipos
+            razonSocial={bloqueadoRazonSocial}
+            cuit={bloqueadoCuit}
+            equipos={equiposVencidos}
+            onVolver={() => setVista('escanear')}
+          />
+        )}
+
         {/* ── VISITA ── */}
         {vista === 'visita' && proveedorEncontrado && (
           <div className="space-y-4">
@@ -532,7 +640,6 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
               <p className="font-medium text-sm">{proveedorEncontrado.razon_social}</p>
             </div>
 
-            {/* Estado de habilitación — UX-H-03: texto formateado */}
             <div className={`rounded-xl border px-4 py-3 ${
               proveedorEncontrado.habilitacion_estado === 'VIGENTE'       ? 'bg-green-500/10 border-green-500/20' :
               proveedorEncontrado.habilitacion_estado === 'EN_REVISION'   ? 'bg-yellow-500/10 border-yellow-500/20' :
@@ -549,15 +656,18 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
               {proveedorEncontrado.docs_vencidos > 0 && (
                 <p className="text-red-400 text-xs mt-1">{proveedorEncontrado.docs_vencidos} documento(s) vencido(s)</p>
               )}
-              {/* UX-P-08: aviso explícito si está en revisión */}
               {proveedorEncontrado.habilitacion_estado === 'EN_REVISION' && (
                 <p className="text-yellow-300 text-xs mt-1.5 leading-relaxed">
-                  ⚠ Este proveedor tiene documentación en revisión. Consultá con tu supervisor antes de permitir el ingreso.
+                  ⚠ Documentación en revisión. Consultá con tu supervisor antes de permitir el ingreso.
+                </p>
+              )}
+              {!online && (
+                <p className="text-yellow-500 text-xs mt-1.5">
+                  ⚠ Sin conexión — no se pudo verificar equipos en tiempo real
                 </p>
               )}
             </div>
 
-            {/* Resultado */}
             <div>
               <p className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-2">Resultado de la visita</p>
               <div className="grid grid-cols-2 gap-2">
@@ -572,7 +682,6 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
               </div>
             </div>
 
-            {/* Checklist */}
             {snapshot?.checklist && snapshot.checklist.length > 0 && (
               <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-4 space-y-3">
                 <p className="text-zinc-400 text-xs font-medium uppercase tracking-wide">Checklist de puntos</p>
@@ -601,23 +710,19 @@ export default function AuditorApp({ establecimientos, auditorId }: { establecim
               </div>
             )}
 
-            {/* Observación */}
             <div>
               <p className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-2">Observación general</p>
               <textarea value={observacion} onChange={e => setObservacion(e.target.value)}
                 rows={3} placeholder="Describí lo observado..." className={inputCls + ' resize-none'}/>
             </div>
 
-            {/* Foto */}
             <div>
               <p className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-2">Foto (opcional)</p>
               {foto ? (
                 <div className="relative">
                   <img src={foto} alt="foto" className="w-full h-40 object-cover rounded-xl"/>
                   <button onClick={() => setFoto(null)}
-                    className="absolute top-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded-lg">
-                    Cambiar
-                  </button>
+                    className="absolute top-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded-lg">Cambiar</button>
                 </div>
               ) : (
                 <button onClick={() => fileRef.current?.click()}
