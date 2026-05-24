@@ -3,16 +3,20 @@ import { cookies } from 'next/headers'
 
 export function createClient() {
   const cookieStore = cookies()
+
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
+        async getAll() {
+          return (await cookieStore).getAll()
+        },
+        async setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
           try {
+            const store = await cookieStore
             cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
+              store.set(name, value, options)
             )
           } catch { /* Server Components read-only — se ignora */ }
         },
