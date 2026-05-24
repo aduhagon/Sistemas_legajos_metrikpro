@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import AuditoriasReportes from './AuditoriasReportes'
 import BtnRecordatorio from './BtnRecordatorio'
+import ActividadTab from './ActividadTab'
 
 type Props = {
   stats: { total: number; pendientes: number; enRevision: number; aprobados: number; rechazados: number; suspendidos: number }
@@ -720,42 +721,14 @@ export default function ReportesClient({
         <AuditoriasReportes visitas={visitas} rol={rol} />
       )}
 
-      {/* ── ACTIVIDAD ── */}
+      {/* ── ACTIVIDAD ── UX-P-04: feed con lenguaje de negocio */}
       {tab === 'actividad' && (
         <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
           <div className="px-5 py-4 border-b border-white/[0.06]">
             <h3 className="text-sm font-medium">Actividad reciente</h3>
-            <p className="text-zinc-500 text-xs mt-0.5">Últimas 20 acciones registradas</p>
+            <p className="text-zinc-500 text-xs mt-0.5">Últimas 50 acciones — acciones similares consecutivas aparecen agrupadas</p>
           </div>
-          {actividad.length === 0 ? (
-            <div className="px-5 py-8 text-center"><p className="text-zinc-500 text-sm">Sin actividad registrada</p></div>
-          ) : (
-            <div className="divide-y divide-white/[0.04]">
-              {actividad.map((a: any) => (
-                <div key={a.id} className="px-5 py-3 flex items-center gap-4">
-                  <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
-                    a.accion === 'APROBADO' ? 'bg-green-500/10' :
-                    a.accion === 'RECHAZADO' ? 'bg-red-500/10' : 'bg-blue-500/10'
-                  }`}>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-                      stroke={a.accion === 'APROBADO' ? '#22c55e' : a.accion === 'RECHAZADO' ? '#ef4444' : '#60a5fa'}
-                      strokeWidth="2">
-                      {a.accion === 'APROBADO' ? <polyline points="20,6 9,17 4,12"/> :
-                       a.accion === 'RECHAZADO' ? <><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></> :
-                       <circle cx="12" cy="12" r="4"/>}
-                    </svg>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <span className="text-white text-sm">{a.accion.replace(/_/g, ' ').toLowerCase()}</span>
-                    <span className="text-zinc-600 text-xs ml-2">{a.entidad}</span>
-                  </div>
-                  <span className="text-zinc-600 text-xs shrink-0">
-                    {new Date(a.created_at).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
+          <ActividadTab actividad={actividad} />
         </div>
       )}
     </div>

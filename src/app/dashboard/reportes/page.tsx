@@ -114,12 +114,82 @@ export default async function ReportesPage() {
     .in('estado', ['CARGADO', 'APROBADO'])
     .order('fecha_venc', { ascending: true })
 
-  // ── Actividad ────────────────────────────────────────────
-  const { data: actividad } = await supabase
+  // ── Actividad — UX-P-04: query enriquecida con nombres de negocio ──
+  // JOIN con usuarios, proveedores y documentos para mostrar lenguaje natural
+  const { data: actividadRaw } = await supabase
     .from('audit_log')
-    .select('id, accion, entidad, created_at')
+    .select(`
+      id, accion, entidad, entidad_id, user_id, datos_json, created_at,
+      usuarios:user_id ( nombre )
+    `)
     .order('created_at', { ascending: false })
-    .limit(20)
+    .limit(50)
+
+  // Enriquecer con nombres de proveedores y documentos según el tipo de entidad
+  const actividad = await Promise.all(
+    (actividadRaw ?? []).map(async (ev: any) => {
+      let proveedor_nombre = null
+      let proveedor_id = null
+      let doc_nombre = null
+
+      if (ev.entidad === 'proveedores' && ev.entidad_id) {
+        const { data: p } = await supabase
+          .from('proveedores')
+          .select('id, razon_social')
+          .eq('id', ev.entidad_id)
+          .maybeSingle()
+        proveedor_nombre = p?.razon_social ?? null
+        proveedor_id = p?.id ?? null
+
+      } else if (ev.entidad === 'documentos_legajo' && ev.entidad_id) {
+        const { data: dl } = await supabase
+          .from('documentos_legajo')
+          .select('proveedor_id, documentos_requeridos(nombre), proveedores(id, razon_social)')
+          .eq('id', ev.entidad_id)
+          .maybeSingle()
+        doc_nombre = (dl?.documentos_requeridos as any)?.nombre ?? null
+        proveedor_nombre = (dl?.proveedores as any)?.razon_social ?? null
+        proveedor_id = (dl?.proveedores as any)?.id ?? null
+
+      } else if (ev.entidad === 'documentos_equipo' && ev.entidad_id) {
+        const { data: de } = await supabase
+          .from('documentos_equipo')
+          .select('equipos_contratista(proveedores(id, razon_social)), documentos_requeridos_equipo(nombre)')
+          .eq('id', ev.entidad_id)
+          .maybeSingle()
+        doc_nombre = (de?.documentos_requeridos_equipo as any)?.nombre ?? null
+        const prov = (de?.equipos_contratista as any)?.proveedores
+        proveedor_nombre = prov?.razon_social ?? null
+        proveedor_id = prov?.id ?? null
+
+      } else if (ev.entidad === 'visitas_auditoria' && ev.entidad_id) {
+        const { data: va } = await supabase
+          .from('visitas_auditoria')
+          .select('proveedor_id, proveedores(id, razon_social)')
+          .eq('id', ev.entidad_id)
+          .maybeSingle()
+        proveedor_nombre = (va?.proveedores as any)?.razon_social ?? null
+        proveedor_id = (va?.proveedores as any)?.id ?? null
+
+      } else if (ev.entidad === 'equipos_contratista' && ev.entidad_id) {
+        const { data: ec } = await supabase
+          .from('equipos_contratista')
+          .select('proveedores(id, razon_social)')
+          .eq('id', ev.entidad_id)
+          .maybeSingle()
+        proveedor_nombre = (ec?.proveedores as any)?.razon_social ?? null
+        proveedor_id = (ec?.proveedores as any)?.id ?? null
+      }
+
+      return {
+        ...ev,
+        usuario_nombre: (ev.usuarios as any)?.nombre ?? null,
+        proveedor_nombre,
+        proveedor_id,
+        doc_nombre,
+      }
+    })
+  )
 
   // ── Visitas de auditoría ─────────────────────────────────
   const { data: visitas } = await supabase
@@ -149,7 +219,7 @@ export default async function ReportesPage() {
         vencimientos={vencimientos ?? []}
         vencidos={vencidos ?? []}
         porRubro={provs}
-        actividad={actividad ?? []}
+        actividad={actividad}
         todosProveedores={provs}
         accesos={accesos ?? []}
         establecimientos={establecimientos ?? []}
