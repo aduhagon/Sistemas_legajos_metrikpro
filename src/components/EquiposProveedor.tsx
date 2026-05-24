@@ -96,36 +96,19 @@ function UploadModal({
     setUploading(true)
     setError('')
     try {
-      // 1. Storage — path equipos/{equipoId}/{docId}.ext
-      const ext = archivo.name.split('.').pop()
-      const path = `equipos/${equipoId}/${docId}.${ext}`
-      const { error: uploadError } = await supabase.storage
-        .from('documentos')
-        .upload(path, archivo, { upsert: true })
-      if (uploadError) throw new Error(uploadError.message)
+      // DT-002: upload + hash SHA-256 delegados al servidor
+      const form = new FormData()
+      form.append('file', archivo)
+      form.append('doc_id', docId)
+      form.append('tipo', 'equipo')
+      if (necesitaFecha && fecha) form.append('fecha_venc', fecha)
 
-      // 2. URL firmada 1 año
-      const { data: urlData } = await supabase.storage
-        .from('documentos')
-        .createSignedUrl(path, 60 * 60 * 24 * 365)
-
-      // 3. Hash SHA-256
-      const buffer = await archivo.arrayBuffer()
-      const hashBuffer = await crypto.subtle.digest('SHA-256', buffer)
-      const hash = Array.from(new Uint8Array(hashBuffer))
-        .map(b => b.toString(16).padStart(2, '0')).join('')
-
-      // 4. RPC
-      const { error: rpcError } = await supabase.rpc('presentar_documento_equipo', {
-        p_doc_id:      docId,
-        p_archivo_url: urlData?.signedUrl ?? path,
-        p_hash_sha256: hash,
-        p_fecha_venc:  necesitaFecha ? fecha : null,
-      })
-      if (rpcError) throw new Error(rpcError.message)
+      const res = await fetch('/api/proveedor/upload', { method: 'POST', body: form })
+      const data = await res.json()
+      if (!data.ok) throw new Error(data.error ?? 'Error al subir el archivo')
 
       setOk(true)
-      onSuccess(docId, urlData?.signedUrl ?? path, necesitaFecha ? fecha : null)
+      onSuccess(docId, '', necesitaFecha ? fecha : null)
       setTimeout(onClose, 1200)
     } catch (err: any) {
       setError(err.message ?? 'Error al subir el archivo')
