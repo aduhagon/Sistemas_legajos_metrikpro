@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
+import { supabase } from '@/lib/supabase-client'
 
 type RubroRef = { rubros: { id: string; nombre: string; codigo: number } | null }
 
@@ -12,13 +13,13 @@ type Proveedor = {
   tipo_proveedor: string
   estado: string
   created_at: string
-  rubros: { nombre: string } | null          // legacy — primer rubro
-  proveedor_rubros: RubroRef[]               // ← multi-rubro
+  rubros: { nombre: string } | null
+  proveedor_rubros: RubroRef[]
   documentos_legajo: { id: string; estado: string; fecha_venc: string | null }[]
 }
 
 type SortKey = 'razon_social' | 'estado' | 'created_at' | 'docs' | 'vencimiento'
-type SortDir = 'asc' | 'desc'
+type SortDir  = 'asc' | 'desc'
 
 const ESTADO_CFG: Record<string, { label: string; color: string }> = {
   PENDIENTE:   { label: 'Pendiente',   color: 'yellow' },
@@ -51,14 +52,11 @@ function proximoVencimiento(docs: Proveedor['documentos_legajo']): number | null
   return Math.min(...activos)
 }
 
-// ── Helper: obtener nombres de rubros del proveedor ──────────────────────────
 function getRubrosProveedor(p: Proveedor): string[] {
   const nombres = new Set<string>()
-  // Rubros de proveedor_rubros (nueva tabla)
   for (const pr of p.proveedor_rubros ?? []) {
     if (pr.rubros?.nombre) nombres.add(pr.rubros.nombre)
   }
-  // Fallback: rubro legacy
   if (nombres.size === 0 && p.rubros?.nombre) nombres.add(p.rubros.nombre)
   return Array.from(nombres)
 }
@@ -83,18 +81,292 @@ function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
   )
 }
 
+// ── Modal Nuevo Proveedor ─────────────────────────────────────────────────────
+function ModalNuevoProveedor({
+  rubros,
+  grupoId,
+  onClose,
+  onCreado,
+}: {
+  rubros: { id: string; nombre: string }[]
+  grupoId: string
+  onClose: () => void
+  onCreado: (p: Proveedor) => void
+}) {
+  const [form, setForm] = useState({
+    razon_social: '', cuit: '', email: '', telefono: '',
+    tipo_proveedor: 'PJ', rubro_ids: [] as string[],
+  })
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState('')
+
+  function toggleRubro(id: string) {
+    setForm(f => ({
+      ...f,
+      rubro_ids: f.rubro_ids.includes(id)
+        ? f.rubro_ids.filter(r => r !== id)
+        : [...f.rubro_ids, id],
+    }))
+  }
+
+  async function guardar() {
+    if (!form.razon_social.trim()) { setError('La razón social es obligatoria'); return }
+    if (!form.cuit.trim())         { setError('El CUIT es obligatorio'); return }
+    if (!form.email.trim())        { setError('El email es obligatorio'); return }
+    if (form.rubro_ids.length === 0) { setError('Seleccioná al menos un rubro'); return }
+
+    setLoading(true)
+    setError('')
+
+    try {
+      const { data, error: errFn } = await supabase.rpc('registrar_proveedor', {
+        p_razon_social:       form.razon_social.trim(),
+        p_cuit:               form.cuit.replace(/[-\s]/g, ''),
+        p_tipo_proveedor:     form.tipo_proveedor,
+        p_rubro_id:           form.rubro_ids[0],
+        p_email:              form.email.trim(),
+        p_telefono:           form.telefono.trim() || null,
+        p_notif_vencimientos: false,
+      })
+
+      if (errFn || data?.error) throw new Error(data?.error ?? errFn?.message)
+
+      // Rubros adicionales en proveedor_rubros
+      if (form.rubro_ids.length > 1 && data?.proveedor_id) {
+        await supabase.from('proveedor_rubros').insert(
+          form.rubro_ids.slice(1).map(rid => ({
+            proveedor_id: data.proveedor_id,
+            rubro_id:     rid,
+            grupo_id:     grupoId,
+          }))
+        )
+      }
+
+      // Navegar directo al nuevo legajo
+      if (data?.proveedor_id) {
+        window.location.href = `/dashboard/legajos/${data.proveedor_id}`
+      } else {
+        window.location.reload()
+      }
+    } catch (e: any) {
+      setError(e.message ?? 'Error al crear el proveedor')
+      setLoading(false)
+    }
+  }
+
+  const inputCls = "w-full bg-white/[0.05] border border-white/[0.1] rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-zinc-600"
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-[#12151e] border border-white/[0.08] rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-white/[0.06] flex items-center justify-between sticky top-0 bg-[#12151e]">
+          <h2 className="text-white font-medium">Nuevo proveedor</h2>
+          <button onClick={onClose} className="text-zinc-500 hover:text-white transition-colors">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+
+        <div className="px-6 py-5 space-y-4">
+
+          {/* Razón social */}
+          <div>
+            <label className="block text-zinc-400 text-xs mb-1.5">Razón social *</label>
+            <input value={form.razon_social}
+              onChange={e => setForm(f => ({ ...f, razon_social: e.target.value }))}
+              placeholder="Empresa S.A." autoFocus className={inputCls}/>
+          </div>
+
+          {/* CUIT + Tipo */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-zinc-400 text-xs mb-1.5">CUIT *</label>
+              <input value={form.cuit}
+                onChange={e => setForm(f => ({ ...f, cuit: e.target.value }))}
+                placeholder="20-12345678-9" className={inputCls}/>
+            </div>
+            <div>
+              <label className="block text-zinc-400 text-xs mb-1.5">Tipo</label>
+              <select value={form.tipo_proveedor}
+                onChange={e => setForm(f => ({ ...f, tipo_proveedor: e.target.value }))}
+                className="w-full bg-[#1a1d27] border border-white/[0.1] rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500/50">
+                <option value="PJ">Persona Jurídica</option>
+                <option value="PF">Persona Física</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Email + Teléfono */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-zinc-400 text-xs mb-1.5">Email *</label>
+              <input type="email" value={form.email}
+                onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+                placeholder="contacto@empresa.com" className={inputCls}/>
+            </div>
+            <div>
+              <label className="block text-zinc-400 text-xs mb-1.5">Teléfono</label>
+              <input value={form.telefono}
+                onChange={e => setForm(f => ({ ...f, telefono: e.target.value }))}
+                placeholder="+54 11 1234-5678" className={inputCls}/>
+            </div>
+          </div>
+
+          {/* Rubros multi-select */}
+          <div>
+            <label className="block text-zinc-400 text-xs mb-1.5">
+              Rubro(s) *
+              <span className="text-zinc-600 ml-1">({form.rubro_ids.length} seleccionado{form.rubro_ids.length !== 1 ? 's' : ''})</span>
+            </label>
+            <div className="grid grid-cols-2 gap-1.5">
+              {rubros.map(r => {
+                const sel = form.rubro_ids.includes(r.id)
+                return (
+                  <button key={r.id} type="button" onClick={() => toggleRubro(r.id)}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-left transition-all ${
+                      sel ? 'border-blue-500/50 bg-blue-500/8' : 'border-white/[0.06] bg-white/[0.02] hover:border-white/[0.15]'
+                    }`}>
+                    <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
+                      sel ? 'border-blue-500 bg-blue-500' : 'border-zinc-600'
+                    }`}>
+                      {sel && (
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
+                          <polyline points="20,6 9,17 4,12"/>
+                        </svg>
+                      )}
+                    </div>
+                    <span className={`text-sm truncate ${sel ? 'text-white' : 'text-zinc-300'}`}>{r.nombre}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {error && (
+            <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">
+              <p className="text-red-300 text-sm">{error}</p>
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-1">
+            <button onClick={onClose}
+              className="flex-1 py-2.5 rounded-xl border border-white/[0.08] text-zinc-400 hover:text-white text-sm transition-colors">
+              Cancelar
+            </button>
+            <button onClick={guardar} disabled={loading}
+              className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+              {loading ? 'Creando...' : 'Crear proveedor'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Modal Invitar Proveedor ───────────────────────────────────────────────────
+function ModalInvitar({ onClose }: { onClose: () => void }) {
+  const [copiado, setCopiado] = useState(false)
+  const url = typeof window !== 'undefined'
+    ? `${window.location.origin}/proveedor/registro`
+    : 'https://sistemas-legajos-metrikpro.vercel.app/proveedor/registro'
+
+  function copiar() {
+    navigator.clipboard.writeText(url)
+    setCopiado(true)
+    setTimeout(() => setCopiado(false), 2500)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-[#12151e] border border-white/[0.08] rounded-2xl w-full max-w-md">
+
+        <div className="px-6 py-4 border-b border-white/[0.06] flex items-center justify-between">
+          <h2 className="text-white font-medium">Invitar proveedor</h2>
+          <button onClick={onClose} className="text-zinc-500 hover:text-white transition-colors">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+
+        <div className="px-6 py-5 space-y-4">
+          <p className="text-zinc-400 text-sm">
+            Compartí este link con el proveedor para que complete su registro y cargue su documentación de forma autónoma.
+          </p>
+
+          {/* Link */}
+          <div className="bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-3 flex items-center gap-3">
+            <span className="text-zinc-300 text-sm flex-1 truncate font-mono text-xs">{url}</span>
+            <button onClick={copiar}
+              className={`shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition-all ${
+                copiado
+                  ? 'bg-green-500/15 text-green-400 border border-green-500/20'
+                  : 'bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 border border-white/[0.1]'
+              }`}>
+              {copiado ? (
+                <>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <polyline points="20,6 9,17 4,12"/>
+                  </svg>
+                  Copiado
+                </>
+              ) : (
+                <>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                  </svg>
+                  Copiar
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* También abrir en nueva pestaña */}
+          <div className="flex gap-3">
+            <a href={url} target="_blank" rel="noopener noreferrer"
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border border-white/[0.08] text-zinc-400 hover:text-white text-sm transition-colors">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+              </svg>
+              Ver formulario
+            </a>
+            <button onClick={onClose}
+              className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium transition-colors">
+              Listo
+            </button>
+          </div>
+
+          <p className="text-zinc-600 text-xs">
+            Una vez que el proveedor complete el formulario, aparecerá en este listado con estado <span className="text-yellow-400">Pendiente</span> esperando revisión.
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Componente principal ──────────────────────────────────────────────────────
 export default function LegajosClient({
   proveedores,
   rubros,
+  grupoId,
 }: {
   proveedores: Proveedor[]
   rubros: { id: string; nombre: string }[]
+  grupoId: string
 }) {
   const [busqueda, setBusqueda]         = useState('')
   const [filtroEstado, setFiltroEstado] = useState('TODOS')
   const [filtroRubro, setFiltroRubro]   = useState('TODOS')
   const [sortKey, setSortKey]           = useState<SortKey>('created_at')
   const [sortDir, setSortDir]           = useState<SortDir>('desc')
+  const [modalNuevo, setModalNuevo]     = useState(false)
+  const [modalInvitar, setModalInvitar] = useState(false)
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -112,28 +384,25 @@ export default function LegajosClient({
       )
     }
 
-    if (filtroEstado !== 'TODOS') {
-      lista = lista.filter(p => p.estado === filtroEstado)
-    }
+    if (filtroEstado !== 'TODOS') lista = lista.filter(p => p.estado === filtroEstado)
 
-    // Filtro multi-rubro: chequea si alguno de los rubros del proveedor coincide
     if (filtroRubro !== 'TODOS') {
       lista = lista.filter(p => getRubrosProveedor(p).includes(filtroRubro))
     }
 
     lista.sort((a, b) => {
       let va: any, vb: any
-      if (sortKey === 'razon_social') {
-        va = a.razon_social.toLowerCase(); vb = b.razon_social.toLowerCase()
-      } else if (sortKey === 'estado') {
+      if (sortKey === 'razon_social') { va = a.razon_social.toLowerCase(); vb = b.razon_social.toLowerCase() }
+      else if (sortKey === 'estado') {
         const orden = ['PENDIENTE','EN_REVISION','APROBADO','RECHAZADO','SUSPENDIDO']
         va = orden.indexOf(a.estado); vb = orden.indexOf(b.estado)
-      } else if (sortKey === 'created_at') {
-        va = a.created_at; vb = b.created_at
-      } else if (sortKey === 'docs') {
+      }
+      else if (sortKey === 'created_at') { va = a.created_at; vb = b.created_at }
+      else if (sortKey === 'docs') {
         va = a.documentos_legajo.filter(d => d.estado === 'APROBADO').length
         vb = b.documentos_legajo.filter(d => d.estado === 'APROBADO').length
-      } else if (sortKey === 'vencimiento') {
+      }
+      else if (sortKey === 'vencimiento') {
         va = proximoVencimiento(a.documentos_legajo) ?? 9999
         vb = proximoVencimiento(b.documentos_legajo) ?? 9999
       }
@@ -154,13 +423,12 @@ export default function LegajosClient({
   const hayFiltros = busqueda || filtroEstado !== 'TODOS' || filtroRubro !== 'TODOS'
 
   function limpiar() {
-    setBusqueda('')
-    setFiltroEstado('TODOS')
-    setFiltroRubro('TODOS')
+    setBusqueda(''); setFiltroEstado('TODOS'); setFiltroRubro('TODOS')
   }
 
   return (
     <div>
+      {/* ── Header ── */}
       <div className="flex items-center justify-between mb-5">
         <div>
           <h1 className="text-xl font-medium">Legajos de proveedores</h1>
@@ -170,9 +438,28 @@ export default function LegajosClient({
               : `${filtrados.length} de ${proveedores.length} registros`}
           </p>
         </div>
+
+        {/* Botones de alta */}
+        <div className="flex items-center gap-2">
+          <button onClick={() => setModalInvitar(true)}
+            className="flex items-center gap-2 bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.1] text-zinc-300 text-sm font-medium px-4 py-2 rounded-xl transition-colors">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+              <polyline points="22,6 12,13 2,6"/>
+            </svg>
+            Invitar proveedor
+          </button>
+          <button onClick={() => setModalNuevo(true)}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-xl transition-colors">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M12 5v14M5 12h14"/>
+            </svg>
+            Nuevo proveedor
+          </button>
+        </div>
       </div>
 
-      {/* Barra búsqueda + filtro rubro */}
+      {/* Búsqueda + filtro rubro */}
       <div className="flex gap-2 mb-3">
         <div className="relative flex-1">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#52525b" strokeWidth="2"
@@ -192,7 +479,7 @@ export default function LegajosClient({
           )}
         </div>
         <select value={filtroRubro} onChange={e => setFiltroRubro(e.target.value)}
-          className="bg-white/[0.04] border border-white/[0.08] rounded-xl px-3 py-2.5 text-sm text-zinc-300 focus:outline-none focus:border-blue-500/50 transition-all appearance-none cursor-pointer">
+          className="bg-white/[0.04] border border-white/[0.08] rounded-xl px-3 py-2.5 text-sm text-zinc-300 focus:outline-none focus:border-blue-500/50 appearance-none cursor-pointer">
           <option value="TODOS">Todos los rubros</option>
           {rubros.map(r => <option key={r.id} value={r.nombre}>{r.nombre}</option>)}
         </select>
@@ -237,11 +524,17 @@ export default function LegajosClient({
             </>
           ) : (
             <>
-              <p className="text-zinc-500">No hay proveedores registrados todavía.</p>
-              <Link href="/registro" target="_blank"
-                className="mt-4 inline-block text-blue-400 hover:text-blue-300 text-sm">
-                Ir al portal de registro →
-              </Link>
+              <p className="text-zinc-500 mb-4">No hay proveedores registrados todavía.</p>
+              <div className="flex items-center justify-center gap-3">
+                <button onClick={() => setModalNuevo(true)}
+                  className="text-sm bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl transition-colors">
+                  + Nuevo proveedor
+                </button>
+                <button onClick={() => setModalInvitar(true)}
+                  className="text-sm text-blue-400 hover:text-blue-300 transition-colors">
+                  Invitar proveedor →
+                </button>
+              </div>
             </>
           )}
         </div>
@@ -305,17 +598,14 @@ export default function LegajosClient({
                     <td className="px-6 py-3.5">
                       <p className="text-sm font-medium text-white">{p.razon_social}</p>
                     </td>
-
                     <td className="px-4 py-3.5 text-zinc-400 text-sm font-mono">{p.cuit}</td>
-
-                    {/* Columna rubros — muestra hasta 2 con chip, el resto como "+N" */}
                     <td className="px-4 py-3.5">
                       {rubrosNombres.length === 0 ? (
                         <span className="text-zinc-600 text-xs">—</span>
                       ) : rubrosNombres.length === 1 ? (
                         <span className="text-zinc-400 text-xs">{rubrosNombres[0]}</span>
                       ) : (
-                        <div className="flex items-center gap-1 flex-wrap">
+                        <div className="flex items-center gap-1">
                           <span className="text-zinc-400 text-xs truncate max-w-[100px]">{rubrosNombres[0]}</span>
                           <span className="text-xs bg-white/[0.06] border border-white/[0.1] text-zinc-500 px-1.5 py-0.5 rounded-full shrink-0">
                             +{rubrosNombres.length - 1}
@@ -323,25 +613,19 @@ export default function LegajosClient({
                         </div>
                       )}
                     </td>
-
                     <td className="px-4 py-3.5">
                       <span className="text-zinc-500 text-xs bg-white/[0.05] px-2 py-0.5 rounded">
                         {p.tipo_proveedor}
                       </span>
                     </td>
-
                     <td className="px-4 py-3.5 text-zinc-400 text-sm">{docsOk}/{docs.length}</td>
-
                     <td className="px-4 py-3.5"><VencimientoBadge dias={venc}/></td>
-
                     <td className="px-4 py-3.5">
                       <span className={`text-xs px-2.5 py-1 rounded-full border ${estadoClass(cfg.color)}`}>
                         {cfg.label}
                       </span>
                     </td>
-
                     <td className="px-4 py-3.5 text-zinc-500 text-sm">{fecha}</td>
-
                     <td className="px-4 py-3.5">
                       <span className="text-blue-400 text-sm">Ver →</span>
                     </td>
@@ -352,6 +636,17 @@ export default function LegajosClient({
           </table>
         </div>
       )}
+
+      {/* Modals */}
+      {modalNuevo && (
+        <ModalNuevoProveedor
+          rubros={rubros}
+          grupoId={grupoId}
+          onClose={() => setModalNuevo(false)}
+          onCreado={() => {}}
+        />
+      )}
+      {modalInvitar && <ModalInvitar onClose={() => setModalInvitar(false)}/>}
     </div>
   )
 }
