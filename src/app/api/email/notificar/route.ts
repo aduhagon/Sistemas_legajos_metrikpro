@@ -2,13 +2,20 @@ import { NextResponse } from 'next/server'
 import nodemailer from 'nodemailer'
 import { createClient } from '@/lib/supabase-server'
 import { getGrupoId } from '@/lib/grupo'
+import { registrarAlerta } from '@/lib/superadmin/registrar-alerta'
 
 export async function POST(req: Request) {
+  // grupoId fuera del try para poder usarlo en alertas si falla algo
+  let grupoId: string | null = null
+  let tipo: string | undefined
+
   try {
-    const { tipo, proveedor_id, doc_nombre, observaciones } = await req.json()
+    const body = await req.json()
+    tipo = body.tipo
+    const { proveedor_id, doc_nombre, observaciones } = body
 
     const supabase = createClient()
-    const grupoId = await getGrupoId()
+    grupoId = await getGrupoId()
 
     const { data: config } = await supabase
       .from('grupos_config')
@@ -17,6 +24,13 @@ export async function POST(req: Request) {
       .single()
 
     if (!config?.smtp_user) {
+      await registrarAlerta({
+        grupoId: grupoId!,
+        tipo: 'smtp_no_configurado',
+        severidad: 'critica',
+        mensaje: 'Intento de envío de email pero SMTP no está configurado',
+        datos: { tipo_email: tipo, proveedor_id },
+      })
       return NextResponse.json({ ok: false, error: 'SMTP no configurado' })
     }
 
@@ -24,6 +38,13 @@ export async function POST(req: Request) {
       .rpc('fn_smtp_get_password', { p_grupo_id: grupoId })
 
     if (pwErr || !smtpPassword) {
+      await registrarAlerta({
+        grupoId: grupoId!,
+        tipo: 'smtp_password_error',
+        severidad: 'critica',
+        mensaje: 'No se pudo descifrar la contraseña SMTP del Vault',
+        datos: { tipo_email: tipo, proveedor_id, error: pwErr?.message },
+      })
       return NextResponse.json({ ok: false, error: 'No se pudo obtener la contraseña SMTP' })
     }
 
@@ -169,12 +190,42 @@ export async function POST(req: Request) {
       },
     }
 
-    const template = templates[tipo]
+    const template = templates[tipo as string]
     if (!template) return NextResponse.json({ ok: false, error: 'Tipo inválido' })
 
-    await transporter.sendMail({ from, ...template })
+    // ── Envío con captura específica del error SMTP ─────────────
+    try {
+      await transporter.sendMail({ from, ...template })
+    } catch (smtpErr: any) {
+      await registrarAlerta({
+        grupoId: grupoId!,
+        tipo: 'smtp_error',
+        severidad: 'critica',
+        mensaje: `Falló envío de email tipo "${tipo}" a ${template.to}`,
+        datos: {
+          tipo_email: tipo,
+          destinatario: template.to,
+          proveedor_id,
+          error: smtpErr?.message ?? String(smtpErr),
+          smtp_host: config.smtp_host,
+          smtp_port: config.smtp_port,
+        },
+      })
+      return NextResponse.json({ ok: false, error: smtpErr?.message ?? 'Error SMTP' })
+    }
+
     return NextResponse.json({ ok: true })
   } catch (e: any) {
+    // Captura genérica — si tenemos grupoId, registramos alerta para análisis
+    if (grupoId) {
+      await registrarAlerta({
+        grupoId,
+        tipo: 'email_notificar_exception',
+        severidad: 'alta',
+        mensaje: `Excepción en /api/email/notificar (tipo=${tipo ?? 'desconocido'})`,
+        datos: { error: e?.message ?? String(e), tipo_email: tipo },
+      })
+    }
     return NextResponse.json({ ok: false, error: e.message })
   }
 }

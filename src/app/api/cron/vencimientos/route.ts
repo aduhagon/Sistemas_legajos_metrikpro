@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase-server'
 import { getGrupoId } from '@/lib/grupo'
+import { registrarAlerta } from '@/lib/superadmin/registrar-alerta'
 import nodemailer from 'nodemailer'
 
 export async function GET(req: Request) {
@@ -32,6 +33,18 @@ export async function GET(req: Request) {
   const { data: smtpPassword } = await supabase.rpc('fn_smtp_get_password', { p_grupo_id: grupoId })
   const smtpOk = config?.smtp_user && smtpPassword
 
+  // Si SMTP no está configurado, el cron sigue (sigue procesando vencimientos en BD)
+  // pero registramos alerta para que el superadmin lo vea.
+  if (!smtpOk) {
+    await registrarAlerta({
+      grupoId,
+      tipo: 'smtp_no_configurado',
+      severidad: 'critica',
+      mensaje: 'Cron de vencimientos corriendo SIN SMTP — no se enviarán emails de aviso',
+      datos: { smtp_user: config?.smtp_user ?? null, smtp_pass_disponible: !!smtpPassword },
+    })
+  }
+
   function crearTransporter() {
     return nodemailer.createTransport({
       host: config?.smtp_host || 'smtp.gmail.com',
@@ -44,8 +57,6 @@ export async function GET(req: Request) {
   const from = `"${config?.smtp_from_name || 'Sistema Legajos'}" <${config?.smtp_from_email || config?.smtp_user}>`
 
   // ── 1. VENCIMIENTOS — BATCH (ESC-001) ───────────────────────
-  // Reemplaza el loop N+1 anterior por 3 UPDATEs en una sola función SQL.
-  // Con 4.000 proveedores pasa de ~24.000 queries a 3 — sin riesgo de timeout.
   const { data: batchResult } = await supabase
     .rpc('fn_procesar_vencimientos_legajo')
 
@@ -57,12 +68,11 @@ export async function GET(req: Request) {
 
   // ── 2. EMAIL al evaluador si hay docs vencidos ───────────────
   if (smtpOk && config?.notif_evaluador_email && resultados.vencidos > 0) {
-    // Traer los docs recién vencidos para el email (solo lectura)
     const { data: docsVencidos } = await supabase
       .from('documentos_legajo')
       .select('id, fecha_venc, documentos_requeridos(nombre), proveedores(id, razon_social, email, notif_vencimientos)')
       .eq('estado', 'VENCIDO')
-      .gte('updated_at', hoyStr)  // solo los procesados hoy
+      .gte('updated_at', hoyStr)
       .order('fecha_venc')
 
     if (docsVencidos?.length) {
@@ -79,7 +89,14 @@ export async function GET(req: Request) {
           </div>`,
         })
         resultados.emailsEnviados++
-      } catch (e: any) { resultados.errores.push(`Email vencidos evaluador: ${e.message}`) }
+      } catch (e: any) {
+        resultados.errores.push(`Email vencidos evaluador: ${e.message}`)
+        await registrarAlerta({
+          grupoId, tipo: 'smtp_error', severidad: 'critica',
+          mensaje: 'Cron: falló email al evaluador sobre documentos vencidos',
+          datos: { destinatario: config.notif_evaluador_email, cantidad_docs: docsVencidos.length, error: e?.message },
+        })
+      }
 
       // Emails a proveedores con notif activada
       if (smtpOk) {
@@ -89,6 +106,7 @@ export async function GET(req: Request) {
             .map((d: any) => [d.proveedores.id, d.proveedores])
         ).values())
 
+        const erroresProvVencidos: string[] = []
         for (const prov of provsNotif as any[]) {
           const docsDelProv = docsVencidos.filter((d: any) => d.proveedores?.id === prov.id)
           const lista = docsDelProv.map((d: any) =>
@@ -105,7 +123,18 @@ export async function GET(req: Request) {
               </div>`,
             })
             resultados.emailsEnviados++
-          } catch (e: any) { resultados.errores.push(`Email vencido proveedor ${prov.email}: ${e.message}`) }
+          } catch (e: any) {
+            resultados.errores.push(`Email vencido proveedor ${prov.email}: ${e.message}`)
+            erroresProvVencidos.push(`${prov.email}: ${e.message}`)
+          }
+        }
+        // Si hubo errores enviando a proveedores, registramos UNA sola alerta con la lista
+        if (erroresProvVencidos.length > 0) {
+          await registrarAlerta({
+            grupoId, tipo: 'smtp_error_lote', severidad: 'critica',
+            mensaje: `Cron: fallaron ${erroresProvVencidos.length} email(s) a proveedores sobre docs vencidos`,
+            datos: { fallos: erroresProvVencidos },
+          })
         }
       }
     }
@@ -137,7 +166,14 @@ export async function GET(req: Request) {
           </div>`,
         })
         resultados.emailsEnviados++
-      } catch (e: any) { resultados.errores.push(`Email por vencer evaluador: ${e.message}`) }
+      } catch (e: any) {
+        resultados.errores.push(`Email por vencer evaluador: ${e.message}`)
+        await registrarAlerta({
+          grupoId, tipo: 'smtp_error', severidad: 'alta',
+          mensaje: 'Cron: falló email al evaluador sobre documentos por vencer',
+          datos: { destinatario: config.notif_evaluador_email, cantidad_docs: docsPorVencer.length, error: e?.message },
+        })
+      }
     }
 
     if (smtpOk) {
@@ -147,6 +183,7 @@ export async function GET(req: Request) {
           .map((d: any) => [(d.proveedores as any).id, d.proveedores])
       ).values())
 
+      const erroresProvPorVencer: string[] = []
       for (const prov of provsNotif as any[]) {
         const docsDelProv = docsPorVencer.filter((d: any) => (d.proveedores as any)?.id === prov.id)
         const lista = docsDelProv.map((d: any) => {
@@ -164,7 +201,17 @@ export async function GET(req: Request) {
             </div>`,
           })
           resultados.emailsEnviados++
-        } catch (e: any) { resultados.errores.push(`Email por vencer proveedor ${(prov as any).email}: ${e.message}`) }
+        } catch (e: any) {
+          resultados.errores.push(`Email por vencer proveedor ${(prov as any).email}: ${e.message}`)
+          erroresProvPorVencer.push(`${(prov as any).email}: ${e.message}`)
+        }
+      }
+      if (erroresProvPorVencer.length > 0) {
+        await registrarAlerta({
+          grupoId, tipo: 'smtp_error_lote', severidad: 'alta',
+          mensaje: `Cron: fallaron ${erroresProvPorVencer.length} email(s) a proveedores sobre docs por vencer`,
+          datos: { fallos: erroresProvPorVencer },
+        })
       }
     }
   }
@@ -223,7 +270,14 @@ export async function GET(req: Request) {
         })
         resultados.emailsEnviados++
       }
-    } catch (e: any) { resultados.errores.push(`Email equipos: ${e.message}`) }
+    } catch (e: any) {
+      resultados.errores.push(`Email equipos: ${e.message}`)
+      await registrarAlerta({
+        grupoId, tipo: 'smtp_error', severidad: 'alta',
+        mensaje: 'Cron: falló email al evaluador sobre vencimientos de equipos',
+        datos: { destinatario: config.notif_evaluador_email, error: e?.message },
+      })
+    }
   }
 
   // ── 5. LIMPIEZA ──────────────────────────────────────────────
