@@ -1,13 +1,14 @@
 // ============================================================
 // /app/superadmin/layout.tsx
-// Layout compartido para todas las rutas /superadmin (excepto login)
-// Server Component — lee sesión y nombre del superadmin
+// Layout compartido para todas las rutas /superadmin
+// IMPORTANTE: este layout se ejecuta TAMBIÉN para /superadmin/login.
+// Para evitar loops, NO hace ninguna verificación de sesión acá.
+// La verificación se hace en el middleware (para rutas != login)
+// y en cada page.tsx individual.
 // ============================================================
 
-import { redirect } from 'next/navigation'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
-import { supabaseAdmin } from '@/lib/superadmin/supabase-admin'
 import SuperadminNav from './SuperadminNav'
 
 export const metadata = {
@@ -19,31 +20,47 @@ export default async function SuperadminLayout({
 }: {
   children: React.ReactNode
 }) {
-  const cookieStore = await cookies()
+  // Intentamos leer el superadmin pero NO redirigimos si falta.
+  // Si no hay sesión (estamos en /superadmin/login), el layout
+  // renderiza el shell sin nombre — pero la página de login tiene
+  // su PROPIO layout que reemplaza este, así que en la práctica
+  // este shell solo se ve para rutas internas autenticadas.
+  let superadminNombre = ''
+  let superadminRol = ''
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll() {},
-      },
+  try {
+    const cookieStore = await cookies()
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() { return cookieStore.getAll() },
+          setAll() {},
+        },
+      }
+    )
+
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (user) {
+      const checkUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/usuarios_metrikpro?user_id=eq.${user.id}&activo=eq.true&select=nombre,rol&limit=1`
+      const checkRes = await fetch(checkUrl, {
+        headers: {
+          apikey:        process.env.SUPABASE_SERVICE_ROLE_KEY!,
+          Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY!}`,
+        },
+        cache: 'no-store',
+      })
+      const arr = await checkRes.json()
+      if (Array.isArray(arr) && arr.length > 0) {
+        superadminNombre = arr[0].nombre || ''
+        superadminRol    = arr[0].rol || ''
+      }
     }
-  )
-
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/superadmin/login')
-
-  // Obtener datos del superadmin con service_role
-  const { data: superadmin } = await supabaseAdmin
-    .from('usuarios_metrikpro')
-    .select('nombre, rol')
-    .eq('user_id', user.id)
-    .eq('activo', true)
-    .single()
-
-  if (!superadmin) redirect('/superadmin/login')
+  } catch {
+    // si falla, simplemente renderizamos sin el nombre
+  }
 
   return (
     <div className="min-h-screen bg-gray-950 flex">
@@ -70,8 +87,8 @@ export default async function SuperadminLayout({
 
         {/* Footer con usuario */}
         <div className="mt-auto px-4 py-3 border-t border-gray-800">
-          <p className="text-xs font-medium text-gray-300 truncate">{superadmin.nombre}</p>
-          <p className="text-[10px] text-gray-600 capitalize">{superadmin.rol}</p>
+          <p className="text-xs font-medium text-gray-300 truncate">{superadminNombre}</p>
+          <p className="text-[10px] text-gray-600 capitalize">{superadminRol}</p>
         </div>
       </aside>
 
