@@ -1,46 +1,32 @@
 // ============================================================
-// /app/superadmin/tenants/[id]/ModulosPorPlan.tsx
-// Client Component — módulos agrupados por plan con cards legibles
-// + confirmación al desactivar core crítico
+// /app/superadmin/tenants/[id]/tabs/ModulosTab.tsx
+// Tab Módulos — agrupados por plan con toggle + confirmación core
 // ============================================================
 'use client'
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import type { ModuloUI } from '../page'
 
-interface ModuloUI {
-  modulo: string
-  nombre: string
-  descripcion: string
-  plan: 'core' | 'addon' | 'premium'
-  orden: number
-  es_core_critico: boolean
-  activo: boolean
-  updated_at: string | null
-}
-
-const PLAN_META: Record<string, { label: string; descripcion: string; color: string; badge: string }> = {
+const PLAN_META: Record<string, { label: string; descripcion: string; badge: string }> = {
   core: {
     label:       'Core',
-    descripcion: 'Módulos esenciales del sistema. Vienen activos por defecto en todos los planes. Desactivarlos puede romper funcionalidades.',
-    color:       'emerald',
+    descripcion: 'Módulos esenciales del sistema. Vienen activos por defecto. Desactivarlos puede romper funcionalidades.',
     badge:       'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
   },
   addon: {
     label:       'Add-ons',
     descripcion: 'Funcionalidades opcionales. El cliente paga extra por cada add-on activado.',
-    color:       'blue',
     badge:       'bg-blue-500/10 text-blue-400 border-blue-500/20',
   },
   premium: {
     label:       'Premium',
     descripcion: 'Features avanzados (IA, integraciones, marca blanca). Solo en planes Premium / Enterprise.',
-    color:       'purple',
     badge:       'bg-purple-500/10 text-purple-400 border-purple-500/20',
   },
 }
 
-export default function ModulosPorPlan({
+export default function ModulosTab({
   modulos,
   grupoId,
 }: {
@@ -75,7 +61,6 @@ export default function ModulosPorPlan({
   }
 
   function onToggleClick(m: ModuloUI) {
-    // Si vamos a DESACTIVAR un core crítico, pedir confirmación
     if (m.activo && m.es_core_critico) {
       setConfirmDesactivar(m)
       return
@@ -83,7 +68,6 @@ export default function ModulosPorPlan({
     toggle(m.modulo, !m.activo)
   }
 
-  // Agrupar por plan
   const grupos: { plan: 'core' | 'addon' | 'premium'; modulos: ModuloUI[] }[] = [
     { plan: 'core',    modulos: modulos.filter(m => m.plan === 'core') },
     { plan: 'addon',   modulos: modulos.filter(m => m.plan === 'addon') },
@@ -97,13 +81,6 @@ export default function ModulosPorPlan({
           {error}
         </div>
       )}
-
-      <section>
-        <h2 className="text-lg font-semibold text-white mb-1">Módulos del tenant</h2>
-        <p className="text-sm text-gray-400 mb-6">
-          Activá o desactivá módulos para definir qué funcionalidades tiene disponible este cliente.
-        </p>
-      </section>
 
       {grupos.map(g => {
         if (g.modulos.length === 0) return null
@@ -122,12 +99,7 @@ export default function ModulosPorPlan({
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {g.modulos.map(m => (
-                <div
-                  key={m.modulo}
-                  className={`bg-gray-900 border rounded-lg p-4 transition ${
-                    m.activo ? 'border-gray-700' : 'border-gray-800/50 opacity-70'
-                  }`}
-                >
+                <div key={m.modulo} className={`bg-gray-900 border rounded-lg p-4 transition ${m.activo ? 'border-gray-700' : 'border-gray-800/50 opacity-70'}`}>
                   <div className="flex items-start justify-between gap-3 mb-2">
                     <div className="flex-1 min-w-0">
                       <h4 className="text-sm font-semibold text-white">{m.nombre}</h4>
@@ -136,20 +108,12 @@ export default function ModulosPorPlan({
                     <button
                       onClick={() => onToggleClick(m)}
                       disabled={loading === m.modulo}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition flex-shrink-0 ${
-                        m.activo ? 'bg-emerald-500' : 'bg-gray-700'
-                      } ${loading === m.modulo ? 'opacity-50' : ''}`}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition flex-shrink-0 ${m.activo ? 'bg-emerald-500' : 'bg-gray-700'} ${loading === m.modulo ? 'opacity-50' : ''}`}
                     >
-                      <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${
-                          m.activo ? 'translate-x-6' : 'translate-x-1'
-                        }`}
-                      />
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${m.activo ? 'translate-x-6' : 'translate-x-1'}`} />
                     </button>
                   </div>
-
                   <p className="text-xs text-gray-400 leading-relaxed">{m.descripcion}</p>
-
                   <div className="mt-3 flex items-center gap-3 text-[10px] text-gray-600">
                     {m.activo ? (
                       <span className="inline-flex items-center gap-1 text-emerald-400 font-medium">
@@ -163,11 +127,7 @@ export default function ModulosPorPlan({
                       </span>
                     )}
                     {m.updated_at && (
-                      <span>
-                        Actualizado {new Date(m.updated_at).toLocaleDateString('es-AR', {
-                          day: '2-digit', month: 'short',
-                        })}
-                      </span>
+                      <span>Actualizado {new Date(m.updated_at).toLocaleDateString('es-AR', { day: '2-digit', month: 'short' })}</span>
                     )}
                   </div>
                 </div>
@@ -177,7 +137,6 @@ export default function ModulosPorPlan({
         )
       })}
 
-      {/* Modal de confirmación para desactivar core crítico */}
       {confirmDesactivar && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
           <div className="bg-gray-900 border border-gray-700 rounded-lg max-w-md w-full p-6">
@@ -190,22 +149,17 @@ export default function ModulosPorPlan({
               <div>
                 <h3 className="text-lg font-semibold text-white">¿Desactivar módulo Core?</h3>
                 <p className="text-sm text-gray-400 mt-1">
-                  Estás por desactivar <strong className="text-white">{confirmDesactivar.nombre}</strong>, que es parte del Core del sistema.
+                  Estás por desactivar <strong className="text-white">{confirmDesactivar.nombre}</strong>, que es parte del Core.
                 </p>
               </div>
             </div>
-
             <div className="bg-amber-500/5 border border-amber-500/20 rounded p-3 mb-4">
               <p className="text-xs text-amber-200">
-                Los módulos Core son esenciales para el funcionamiento del sistema. Al desactivarlo, los usuarios del tenant pueden perder acceso a funcionalidades críticas y partes de la app pueden dejar de funcionar correctamente.
+                Los módulos Core son esenciales para el funcionamiento del sistema. Al desactivarlo, los usuarios pueden perder acceso a funcionalidades críticas.
               </p>
             </div>
-
             <div className="flex items-center justify-end gap-3">
-              <button
-                onClick={() => setConfirmDesactivar(null)}
-                className="px-4 py-2 text-sm text-gray-300 hover:text-white transition"
-              >
+              <button onClick={() => setConfirmDesactivar(null)} className="px-4 py-2 text-sm text-gray-300 hover:text-white transition">
                 Cancelar
               </button>
               <button

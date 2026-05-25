@@ -1,8 +1,6 @@
 // ============================================================
 // /app/api/superadmin/crear-tenant/route.ts
-// Crea un tenant nuevo + admin con password temporal en una operación.
-// Devuelve el password en claro UNA VEZ para que el superadmin se lo
-// comparta al cliente. Una vez cerrado el modal, no hay forma de recuperarlo.
+// v2 — ahora guarda plan + plan_desde + estado_cuenta en grupos_trabajo
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -10,15 +8,13 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
 interface CrearTenantBody {
-  nombre:       string   // "Empresa ACME S.A."
-  slug:         string   // "acme" — único, lowercase, sin espacios
+  nombre:       string
+  slug:         string
   plan:         'basico' | 'pro' | 'enterprise'
-  admin_nombre: string   // "Juan Pérez"
-  admin_email:  string   // "admin@acme.com"
+  admin_nombre: string
+  admin_email:  string
 }
 
-// Genera password temporal: 4 letras + 4 números (legible al teléfono)
-// Sin caracteres ambiguos (0/O, 1/l/I)
 function generarPasswordTemporal(): string {
   const letras  = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
   const numeros = '23456789'
@@ -37,7 +33,6 @@ function validarEmail(email: string): boolean {
 }
 
 export async function POST(req: NextRequest) {
-  // 1. Validar sesión superadmin
   const cookieStore = await cookies()
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -68,7 +63,6 @@ export async function POST(req: NextRequest) {
   }
   const superadminId = saArr[0].id
 
-  // 2. Validar body
   const body = await req.json().catch(() => null) as CrearTenantBody | null
   if (!body) {
     return NextResponse.json({ error: 'Body inválido' }, { status: 400 })
@@ -100,7 +94,7 @@ export async function POST(req: NextRequest) {
     'Content-Type': 'application/json',
   }
 
-  // 3. Verificar slug único
+  // Verificar slug único
   const slugCheck = await fetch(
     `${supabaseUrl}/rest/v1/grupos_trabajo?slug=eq.${encodeURIComponent(slug)}&select=id&limit=1`,
     { headers }
@@ -110,15 +104,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Ya existe un tenant con slug "${slug}"` }, { status: 409 })
   }
 
-  // 4. Verificar que el email no esté ya en auth.users
-  // Lo hacemos via Admin API
+  // Verificar email no existente
   const existeAuthRes = await fetch(
     `${supabaseUrl}/auth/v1/admin/users?email=${encodeURIComponent(admin_email)}`,
     { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } }
   )
   if (existeAuthRes.ok) {
     const usersData = await existeAuthRes.json()
-    // La Admin API devuelve { users: [...] } o un array directo según versión
     const users = Array.isArray(usersData) ? usersData : (usersData.users ?? [])
     const yaExiste = users.find((u: { email?: string }) => u.email?.toLowerCase() === admin_email.toLowerCase())
     if (yaExiste) {
@@ -126,32 +118,30 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ============================================================
-  // Punto sin retorno — empieza la creación
-  // ============================================================
-  let tenantId:    string | null = null
-  let authUserId:  string | null = null
+  let tenantId:   string | null = null
+  let authUserId: string | null = null
 
   try {
-    // 5. Crear tenant en grupos_trabajo
+    // Crear tenant CON plan explícito
+    const hoy = new Date().toISOString().split('T')[0]
     const tenantRes = await fetch(`${supabaseUrl}/rest/v1/grupos_trabajo`, {
       method: 'POST',
       headers: { ...headers, Prefer: 'return=representation' },
       body: JSON.stringify({
-        nombre: nombre.trim(),
-        slug:   slug.toLowerCase().trim(),
-        activo: true,
+        nombre:        nombre.trim(),
+        slug:          slug.toLowerCase().trim(),
+        activo:        true,
+        plan,
+        plan_desde:    hoy,
+        estado_cuenta: 'al_dia',
       }),
     })
-    if (!tenantRes.ok) {
-      const errText = await tenantRes.text()
-      throw new Error('Error creando tenant: ' + errText)
-    }
+    if (!tenantRes.ok) throw new Error('Error creando tenant: ' + await tenantRes.text())
     const tenantData = await tenantRes.json()
     tenantId = Array.isArray(tenantData) ? tenantData[0].id : tenantData.id
     if (!tenantId) throw new Error('No se obtuvo el ID del tenant creado')
 
-    // 6. Crear grupos_config con defaults
+    // Config default
     const configRes = await fetch(`${supabaseUrl}/rest/v1/grupos_config`, {
       method: 'POST',
       headers,
@@ -160,13 +150,9 @@ export async function POST(req: NextRequest) {
         nombre_display: nombre.trim(),
       }),
     })
-    if (!configRes.ok) {
-      const errText = await configRes.text()
-      throw new Error('Error creando config: ' + errText)
-    }
+    if (!configRes.ok) throw new Error('Error creando config: ' + await configRes.text())
 
-    // 7. Insertar módulos según plan elegido
-    // Traemos el catálogo y decidimos cuáles activar
+    // Módulos según plan
     const catalogoRes = await fetch(
       `${supabaseUrl}/rest/v1/catalogo_modulos?select=modulo,plan`,
       { headers }
@@ -192,12 +178,9 @@ export async function POST(req: NextRequest) {
       headers,
       body: JSON.stringify(modulosAInsertar),
     })
-    if (!modulosRes.ok) {
-      const errText = await modulosRes.text()
-      throw new Error('Error insertando módulos: ' + errText)
-    }
+    if (!modulosRes.ok) throw new Error('Error insertando módulos: ' + await modulosRes.text())
 
-    // 8. Crear usuario admin en auth.users con password temporal
+    // Admin en auth.users
     const passwordTemporal = generarPasswordTemporal()
     const authRes = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
       method: 'POST',
@@ -209,19 +192,16 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         email:         admin_email.toLowerCase().trim(),
         password:      passwordTemporal,
-        email_confirm: true,                          // No requiere verificación
+        email_confirm: true,
         user_metadata: { nombre: admin_nombre.trim() },
       }),
     })
-    if (!authRes.ok) {
-      const errText = await authRes.text()
-      throw new Error('Error creando usuario en auth: ' + errText)
-    }
+    if (!authRes.ok) throw new Error('Error creando usuario en auth: ' + await authRes.text())
     const authData = await authRes.json()
     authUserId = authData.id ?? authData.user?.id
     if (!authUserId) throw new Error('No se obtuvo el ID del usuario auth')
 
-    // 9. Link en tabla usuarios con rol admin + primer_login=true
+    // Registro en usuarios
     const usuarioRes = await fetch(`${supabaseUrl}/rest/v1/usuarios`, {
       method: 'POST',
       headers,
@@ -235,12 +215,9 @@ export async function POST(req: NextRequest) {
         activo:       true,
       }),
     })
-    if (!usuarioRes.ok) {
-      const errText = await usuarioRes.text()
-      throw new Error('Error creando registro en usuarios: ' + errText)
-    }
+    if (!usuarioRes.ok) throw new Error('Error creando registro en usuarios: ' + await usuarioRes.text())
 
-    // 10. Audit log
+    // Audit log
     await fetch(`${supabaseUrl}/rest/v1/superadmin_audit_log`, {
       method: 'POST',
       headers,
@@ -259,45 +236,29 @@ export async function POST(req: NextRequest) {
       }),
     })
 
-    // 11. Éxito — devolver datos + password temporal (UNA SOLA VEZ)
     return NextResponse.json({
       ok: true,
-      tenant: {
-        id:     tenantId,
-        nombre,
-        slug,
-        plan,
-      },
+      tenant: { id: tenantId, nombre, slug, plan },
       admin: {
-        email:              admin_email.toLowerCase().trim(),
-        password_temporal:  passwordTemporal,
-        nombre:             admin_nombre.trim(),
+        email:             admin_email.toLowerCase().trim(),
+        password_temporal: passwordTemporal,
+        nombre:            admin_nombre.trim(),
       },
       url_login: `${process.env.NEXT_PUBLIC_SITE_URL ?? 'https://sistemas-legajos-metrikpro.vercel.app'}/login`,
     })
   } catch (err) {
-    // Rollback manual — el orden importa
-    // Si fallamos después de crear el tenant, intentamos limpiar
     console.error('[crear-tenant] error:', err)
 
     if (authUserId) {
-      // Borrar usuario auth
       await fetch(`${supabaseUrl}/auth/v1/admin/users/${authUserId}`, {
         method: 'DELETE',
         headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
       }).catch(() => {})
     }
     if (tenantId) {
-      // Borrar módulos, config y tenant (en orden inverso)
-      await fetch(`${supabaseUrl}/rest/v1/grupos_modulos?grupo_id=eq.${tenantId}`, {
-        method: 'DELETE', headers,
-      }).catch(() => {})
-      await fetch(`${supabaseUrl}/rest/v1/grupos_config?grupo_id=eq.${tenantId}`, {
-        method: 'DELETE', headers,
-      }).catch(() => {})
-      await fetch(`${supabaseUrl}/rest/v1/grupos_trabajo?id=eq.${tenantId}`, {
-        method: 'DELETE', headers,
-      }).catch(() => {})
+      await fetch(`${supabaseUrl}/rest/v1/grupos_modulos?grupo_id=eq.${tenantId}`, { method: 'DELETE', headers }).catch(() => {})
+      await fetch(`${supabaseUrl}/rest/v1/grupos_config?grupo_id=eq.${tenantId}`, { method: 'DELETE', headers }).catch(() => {})
+      await fetch(`${supabaseUrl}/rest/v1/grupos_trabajo?id=eq.${tenantId}`,   { method: 'DELETE', headers }).catch(() => {})
     }
 
     return NextResponse.json(
