@@ -1,10 +1,10 @@
 // ============================================================
 // /app/superadmin/tenants/[id]/page.tsx
-// Detalle de un tenant — info + toggle de módulos
+// Detalle del tenant — JOIN con catalogo_modulos para nombres legibles
 // ============================================================
 
 import Link from 'next/link'
-import ModulosTabla from './ModulosTabla'
+import ModulosPorPlan from './ModulosPorPlan'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,7 +16,7 @@ interface Tenant {
   created_at: string
 }
 
-interface Modulo {
+interface ModuloRow {
   id: string
   grupo_id: string
   modulo: string
@@ -26,8 +26,26 @@ interface Modulo {
   updated_at: string | null
 }
 
-interface Proveedor {
-  id: string
+interface CatalogoRow {
+  modulo: string
+  nombre: string
+  descripcion: string
+  plan: string
+  orden: number
+  es_core_critico: boolean
+}
+
+interface Proveedor { id: string }
+
+export interface ModuloUI {
+  modulo: string
+  nombre: string
+  descripcion: string
+  plan: 'core' | 'addon' | 'premium'
+  orden: number
+  es_core_critico: boolean
+  activo: boolean
+  updated_at: string | null
 }
 
 async function fetchSupabase<T>(path: string): Promise<T> {
@@ -50,9 +68,10 @@ export default async function TenantDetailPage({
 }) {
   const { id } = await params
 
-  const [tenantArr, modulos, proveedores] = await Promise.all([
+  const [tenantArr, modulosTenant, catalogo, proveedores] = await Promise.all([
     fetchSupabase<Tenant[]>(`grupos_trabajo?id=eq.${id}&select=*&limit=1`),
-    fetchSupabase<Modulo[]>(`grupos_modulos?grupo_id=eq.${id}&select=*&order=modulo.asc`),
+    fetchSupabase<ModuloRow[]>(`grupos_modulos?grupo_id=eq.${id}&select=*`),
+    fetchSupabase<CatalogoRow[]>(`catalogo_modulos?select=*&order=orden.asc`),
     fetchSupabase<Proveedor[]>(`proveedores?grupo_id=eq.${id}&select=id`),
   ])
 
@@ -69,7 +88,25 @@ export default async function TenantDetailPage({
     )
   }
 
-  const activosCount = modulos.filter(m => m.activo).length
+  // Combinar catálogo + estado real del tenant
+  const estadoPorModulo = new Map<string, ModuloRow>()
+  for (const m of modulosTenant) estadoPorModulo.set(m.modulo, m)
+
+  const modulosUI: ModuloUI[] = catalogo.map(c => {
+    const estado = estadoPorModulo.get(c.modulo)
+    return {
+      modulo:          c.modulo,
+      nombre:          c.nombre,
+      descripcion:     c.descripcion,
+      plan:            c.plan as 'core' | 'addon' | 'premium',
+      orden:           c.orden,
+      es_core_critico: c.es_core_critico,
+      activo:          estado?.activo ?? false,
+      updated_at:      estado?.updated_at ?? null,
+    }
+  })
+
+  const activosCount = modulosUI.filter(m => m.activo).length
 
   return (
     <div className="p-8">
@@ -100,7 +137,7 @@ export default async function TenantDetailPage({
         <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
           <p className="text-xs text-gray-400 uppercase tracking-wider">Módulos activos</p>
           <p className="text-2xl font-semibold text-white mt-1">
-            {activosCount} <span className="text-base text-gray-500 font-normal">/ {modulos.length}</span>
+            {activosCount} <span className="text-base text-gray-500 font-normal">/ {modulosUI.length}</span>
           </p>
         </div>
         <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
@@ -117,11 +154,8 @@ export default async function TenantDetailPage({
         </div>
       </div>
 
-      {/* Módulos */}
-      <section>
-        <h2 className="text-lg font-semibold text-white mb-3">Módulos</h2>
-        <ModulosTabla modulos={modulos} grupoId={tenant.id} />
-      </section>
+      {/* Módulos agrupados por plan */}
+      <ModulosPorPlan modulos={modulosUI} grupoId={tenant.id} />
     </div>
   )
 }
