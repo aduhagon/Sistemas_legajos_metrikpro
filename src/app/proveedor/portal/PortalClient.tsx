@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase-client'
 
 // ── helpers de estado ────────────────────────────────────────────────────────
@@ -10,6 +10,14 @@ const ESTADO_LABEL: Record<string, { label: string; color: string }> = {
   APROBADO:    { label: 'Aprobado',    color: 'green'  },
   RECHAZADO:   { label: 'Rechazado',   color: 'red'    },
   SUSPENDIDO:  { label: 'Suspendido',  color: 'zinc'   },
+}
+
+const ESTADO_EQUIPO_LABEL: Record<string, { label: string; color: string }> = {
+  PENDIENTE:   { label: 'Pendiente',   color: 'yellow' },
+  EN_REVISION: { label: 'En revisión', color: 'blue'   },
+  APROBADO:    { label: 'Aprobado',    color: 'green'  },
+  RECHAZADO:   { label: 'Rechazado',   color: 'red'    },
+  INACTIVO:    { label: 'Inactivo',    color: 'zinc'   },
 }
 
 function estadoBadgeClass(color: string) {
@@ -35,6 +43,8 @@ function formatFecha(fechaStr: string) {
   return new Date(fechaStr + 'T12:00:00').toLocaleDateString('es-AR')
 }
 
+// ── Tipos ────────────────────────────────────────────────────────────────────
+
 type Tab = 'docs' | 'equipos' | 'historial' | 'personal' | 'accesos' | 'perfil' | 'auditorias'
 
 type Props = {
@@ -46,7 +56,43 @@ type Props = {
   historialPorDoc: Record<string, any[]>
   miRol: string
   visitasAuditoria: any[]
-  equiposSlot: React.ReactNode
+}
+
+interface TipoEquipo {
+  id: string
+  nombre: string
+  icono: string
+}
+
+interface DocRequerido {
+  id: string
+  nombre: string
+  tipo_vigencia: 'PERMANENTE' | 'ANUAL' | 'MENSUAL'
+  obligatorio: boolean
+}
+
+interface DocEquipo {
+  id: string
+  tipo_doc_id: string
+  estado: 'PENDIENTE' | 'CARGADO' | 'APROBADO' | 'RECHAZADO' | 'VENCIDO'
+  fecha_venc: string | null
+  archivo_url: string | null
+  observaciones: string | null
+  documentos_requeridos_equipo: DocRequerido
+}
+
+interface Equipo {
+  id: string
+  dominio: string
+  marca: string | null
+  modelo: string | null
+  anio: number | null
+  seguro_compania: string | null
+  seguro_poliza: string | null
+  seguro_vto: string | null
+  estado: 'PENDIENTE' | 'EN_REVISION' | 'APROBADO' | 'RECHAZADO' | 'INACTIVO'
+  tipos_equipo: TipoEquipo
+  documentos_equipo: DocEquipo[]
 }
 
 const SECCIONES: { key: Tab; icon: string; label: string; color: string; bg: string }[] = [
@@ -59,9 +105,496 @@ const SECCIONES: { key: Tab; icon: string; label: string; color: string; bg: str
   { key: 'auditorias', icon: '📋', label: 'Auditorías', color: 'text-yellow-300', bg: 'bg-yellow-500/10 border-yellow-500/20'  },
 ]
 
+// ── UploadModal (docs legajo) ─────────────────────────────────────────────────
+function UploadModal({ docId, nombre, proveedorId, tipoVigencia, fechaActual, onClose }: {
+  docId: string; nombre: string; proveedorId: string; tipoVigencia: string; fechaActual: string | null; onClose: () => void
+}) {
+  const necesitaFecha = tipoVigencia !== 'PERMANENTE'
+  const [fecha, setFecha] = useState(fechaActual ?? '')
+  const [archivo, setArchivo] = useState<File | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState('')
+  const [ok, setOk] = useState(false)
+  const hoyStr = new Date().toISOString().split('T')[0]
+
+  async function handleSubmit() {
+    if (!archivo) { setError('Seleccioná un archivo'); return }
+    if (necesitaFecha && !fecha) { setError('Ingresá la fecha de vencimiento'); return }
+    setUploading(true); setError('')
+    try {
+      const form = new FormData()
+      form.append('file', archivo); form.append('doc_id', docId); form.append('tipo', 'legajo')
+      if (necesitaFecha && fecha) form.append('fecha_venc', fecha)
+      const res = await fetch('/api/proveedor/upload', { method: 'POST', body: form })
+      const data = await res.json()
+      if (!data.ok) throw new Error(data.error ?? 'Error al subir')
+      setOk(true)
+      setTimeout(() => window.location.reload(), 1000)
+    } catch (err: any) { setError(err.message ?? 'Error al subir el archivo') }
+    finally { setUploading(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.7)' }} onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="bg-[#1a1d27] border border-white/[0.1] rounded-2xl w-full max-w-sm shadow-2xl">
+        <div className="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between">
+          <div>
+            <h3 className="text-white font-medium text-sm">Subir documento</h3>
+            <p className="text-zinc-500 text-xs mt-0.5 truncate max-w-56">{nombre}</p>
+          </div>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 p-1">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div className="px-5 py-4 space-y-4">
+          {ok ? (
+            <div className="text-center py-4">
+              <div className="text-4xl mb-2">✅</div>
+              <p className="text-green-400 font-medium">¡Documento enviado!</p>
+              <p className="text-zinc-500 text-xs mt-1">Recargando…</p>
+            </div>
+          ) : (
+            <>
+              {necesitaFecha && (
+                <div>
+                  <label className="block text-zinc-400 text-xs mb-1.5">Fecha de vencimiento <span className="text-red-400">*</span></label>
+                  <input type="date" value={fecha} min={hoyStr} onChange={e => setFecha(e.target.value)}
+                    className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500/50"/>
+                </div>
+              )}
+              <div>
+                <label className="block text-zinc-400 text-xs mb-1.5">Archivo <span className="text-red-400">*</span> <span className="text-zinc-600">(PDF, JPG, PNG — máx. 10MB)</span></label>
+                <label className={`flex items-center gap-3 w-full border-2 border-dashed rounded-xl px-4 py-5 cursor-pointer transition-all ${archivo ? 'border-blue-500/40 bg-blue-500/5' : 'border-white/[0.1] bg-white/[0.03] hover:border-white/[0.2]'}`}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={archivo ? '#60a5fa' : '#52525b'} strokeWidth="1.5">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                  </svg>
+                  <div className="flex-1 min-w-0">
+                    {archivo ? (<><p className="text-blue-300 text-sm font-medium truncate">{archivo.name}</p><p className="text-zinc-500 text-xs">{(archivo.size/1024).toFixed(0)} KB</p></>) :
+                               (<><p className="text-zinc-400 text-sm">Tocá para seleccionar</p><p className="text-zinc-600 text-xs">o arrastrá el archivo acá</p></>)}
+                  </div>
+                  {archivo && <button type="button" onClick={e => { e.preventDefault(); setArchivo(null) }} className="text-zinc-500 hover:text-zinc-300 shrink-0">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                  </button>}
+                  <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.webp" onChange={e => setArchivo(e.target.files?.[0] ?? null)}/>
+                </label>
+              </div>
+              {error && <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2"><p className="text-red-400 text-xs">{error}</p></div>}
+              <div className="flex gap-2 pt-1">
+                <button onClick={onClose} className="flex-1 bg-white/[0.05] hover:bg-white/[0.08] text-zinc-300 text-sm py-2.5 rounded-xl">Cancelar</button>
+                <button onClick={handleSubmit} disabled={uploading || !archivo || (necesitaFecha && !fecha)}
+                  className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-medium text-sm py-2.5 rounded-xl flex items-center justify-center gap-2">
+                  {uploading ? (<><svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>Subiendo…</>) : 'Enviar documento'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── UploadEquipoModal ─────────────────────────────────────────────────────────
+function UploadEquipoModal({ doc, onClose, onSuccess }: {
+  doc: DocEquipo; onClose: () => void; onSuccess: () => void
+}) {
+  const necesitaFecha = doc.documentos_requeridos_equipo.tipo_vigencia !== 'PERMANENTE'
+  const [fecha, setFecha] = useState(doc.fecha_venc ?? '')
+  const [archivo, setArchivo] = useState<File | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState('')
+  const [ok, setOk] = useState(false)
+  const hoyStr = new Date().toISOString().split('T')[0]
+
+  async function handleSubmit() {
+    if (!archivo) { setError('Seleccioná un archivo'); return }
+    if (necesitaFecha && !fecha) { setError('Ingresá la fecha de vencimiento'); return }
+    setUploading(true); setError('')
+    try {
+      const form = new FormData()
+      form.append('file', archivo)
+      form.append('doc_id', doc.id)
+      if (necesitaFecha && fecha) form.append('fecha_venc', fecha)
+      const res = await fetch('/api/proveedor/upload-equipo', { method: 'POST', body: form })
+      const data = await res.json()
+      if (!data.ok) throw new Error(data.error ?? 'Error al subir')
+      setOk(true)
+      setTimeout(() => { onSuccess(); onClose() }, 800)
+    } catch (err: any) { setError(err.message ?? 'Error al subir el archivo') }
+    finally { setUploading(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.7)' }} onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="bg-[#1a1d27] border border-white/[0.1] rounded-2xl w-full max-w-sm shadow-2xl">
+        <div className="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between">
+          <div>
+            <h3 className="text-white font-medium text-sm">Subir documento</h3>
+            <p className="text-zinc-500 text-xs mt-0.5 truncate max-w-56">{doc.documentos_requeridos_equipo.nombre}</p>
+          </div>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 p-1">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div className="px-5 py-4 space-y-4">
+          {ok ? (
+            <div className="text-center py-4">
+              <div className="text-4xl mb-2">✅</div>
+              <p className="text-green-400 font-medium">¡Documento enviado!</p>
+            </div>
+          ) : (
+            <>
+              {necesitaFecha && (
+                <div>
+                  <label className="block text-zinc-400 text-xs mb-1.5">Fecha de vencimiento <span className="text-red-400">*</span></label>
+                  <input type="date" value={fecha} min={hoyStr} onChange={e => setFecha(e.target.value)}
+                    className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500/50"/>
+                </div>
+              )}
+              <div>
+                <label className="block text-zinc-400 text-xs mb-1.5">Archivo <span className="text-red-400">*</span> <span className="text-zinc-600">(PDF, JPG, PNG — máx. 10MB)</span></label>
+                <label className={`flex items-center gap-3 w-full border-2 border-dashed rounded-xl px-4 py-5 cursor-pointer transition-all ${archivo ? 'border-orange-500/40 bg-orange-500/5' : 'border-white/[0.1] bg-white/[0.03] hover:border-white/[0.2]'}`}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={archivo ? '#fb923c' : '#52525b'} strokeWidth="1.5">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                  </svg>
+                  <div className="flex-1 min-w-0">
+                    {archivo ? (<><p className="text-orange-300 text-sm font-medium truncate">{archivo.name}</p><p className="text-zinc-500 text-xs">{(archivo.size/1024).toFixed(0)} KB</p></>) :
+                               (<><p className="text-zinc-400 text-sm">Tocá para seleccionar</p><p className="text-zinc-600 text-xs">o arrastrá el archivo acá</p></>)}
+                  </div>
+                  {archivo && <button type="button" onClick={e => { e.preventDefault(); setArchivo(null) }} className="text-zinc-500 hover:text-zinc-300 shrink-0">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                  </button>}
+                  <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.webp" onChange={e => setArchivo(e.target.files?.[0] ?? null)}/>
+                </label>
+              </div>
+              {error && <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2"><p className="text-red-400 text-xs">{error}</p></div>}
+              <div className="flex gap-2 pt-1">
+                <button onClick={onClose} className="flex-1 bg-white/[0.05] hover:bg-white/[0.08] text-zinc-300 text-sm py-2.5 rounded-xl">Cancelar</button>
+                <button onClick={handleSubmit} disabled={uploading || !archivo || (necesitaFecha && !fecha)}
+                  className="flex-1 bg-orange-600 hover:bg-orange-500 disabled:opacity-40 text-white font-medium text-sm py-2.5 rounded-xl flex items-center justify-center gap-2">
+                  {uploading ? (<><svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>Subiendo…</>) : 'Enviar documento'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── NuevoEquipoModal ──────────────────────────────────────────────────────────
+function NuevoEquipoModal({ proveedorId, tiposEquipo, onClose, onSuccess }: {
+  proveedorId: string; tiposEquipo: TipoEquipo[]; onClose: () => void; onSuccess: () => void
+}) {
+  const [form, setForm] = useState({
+    tipo_equipo_id: tiposEquipo[0]?.id ?? '',
+    dominio: '', marca: '', modelo: '', anio: '',
+    seguro_compania: '', seguro_poliza: '', seguro_vto: '',
+  })
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })) }
+
+  const inputCls = 'w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500/50 placeholder:text-zinc-600'
+
+  async function handleSubmit() {
+    if (!form.dominio.trim()) { setError('El dominio/patente es requerido'); return }
+    if (!form.tipo_equipo_id) { setError('Seleccioná un tipo de equipo'); return }
+    setLoading(true); setError(null)
+    const { data, error: rpcErr } = await supabase.rpc('registrar_equipo', {
+      p_proveedor_id: proveedorId,
+      p_tipo_equipo_id: form.tipo_equipo_id,
+      p_dominio: form.dominio.trim().toUpperCase(),
+      p_marca: form.marca || null,
+      p_modelo: form.modelo || null,
+      p_anio: form.anio ? parseInt(form.anio) : null,
+      p_seguro_compania: form.seguro_compania || null,
+      p_seguro_poliza: form.seguro_poliza || null,
+      p_seguro_vto: form.seguro_vto || null,
+    })
+    setLoading(false)
+    if (rpcErr) { setError(rpcErr.message); return }
+    if (data && !data.ok) { setError(data.error ?? 'Error al registrar'); return }
+    onSuccess(); onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 overflow-y-auto"
+      style={{ background: 'rgba(0,0,0,0.7)' }} onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="bg-[#1a1d27] border border-white/[0.1] rounded-2xl w-full max-w-sm shadow-2xl my-4">
+        <div className="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between">
+          <h3 className="text-white font-medium text-sm">Registrar equipo</h3>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 p-1">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div className="px-5 py-4 space-y-3">
+          {/* Tipo */}
+          <div>
+            <label className="block text-zinc-400 text-xs mb-1.5">Tipo de equipo <span className="text-red-400">*</span></label>
+            <select value={form.tipo_equipo_id} onChange={e => set('tipo_equipo_id', e.target.value)}
+              className={inputCls + ' bg-[#1a1d27]'}>
+              {tiposEquipo.map(t => <option key={t.id} value={t.id} className="bg-[#1a1d27]">{t.icono} {t.nombre}</option>)}
+            </select>
+          </div>
+          {/* Dominio */}
+          <div>
+            <label className="block text-zinc-400 text-xs mb-1.5">Dominio / Patente <span className="text-red-400">*</span></label>
+            <input type="text" placeholder="Ej: AB123CD" value={form.dominio}
+              onChange={e => set('dominio', e.target.value.toUpperCase())} className={inputCls + ' uppercase'}/>
+          </div>
+          {/* Marca / Modelo */}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-zinc-400 text-xs mb-1.5">Marca</label>
+              <input type="text" placeholder="Ej: Ford" value={form.marca} onChange={e => set('marca', e.target.value)} className={inputCls}/>
+            </div>
+            <div>
+              <label className="block text-zinc-400 text-xs mb-1.5">Modelo</label>
+              <input type="text" placeholder="Ej: F-100" value={form.modelo} onChange={e => set('modelo', e.target.value)} className={inputCls}/>
+            </div>
+          </div>
+          {/* Año */}
+          <div>
+            <label className="block text-zinc-400 text-xs mb-1.5">Año</label>
+            <input type="number" placeholder="Ej: 2018" min={1950} max={new Date().getFullYear() + 1}
+              value={form.anio} onChange={e => set('anio', e.target.value)} className={inputCls}/>
+          </div>
+          {/* Seguro */}
+          <div className="border-t border-white/[0.06] pt-3">
+            <p className="text-zinc-500 text-xs mb-2">Datos del seguro <span className="text-zinc-600">(opcional)</span></p>
+            <div className="space-y-2">
+              <input type="text" placeholder="Compañía aseguradora" value={form.seguro_compania}
+                onChange={e => set('seguro_compania', e.target.value)} className={inputCls}/>
+              <div className="grid grid-cols-2 gap-2">
+                <input type="text" placeholder="Nº de póliza" value={form.seguro_poliza}
+                  onChange={e => set('seguro_poliza', e.target.value)} className={inputCls}/>
+                <input type="date" value={form.seguro_vto}
+                  onChange={e => set('seguro_vto', e.target.value)} className={inputCls}/>
+              </div>
+            </div>
+          </div>
+          {error && <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2"><p className="text-red-400 text-xs">{error}</p></div>}
+          <div className="flex gap-2 pt-1">
+            <button onClick={onClose} disabled={loading} className="flex-1 bg-white/[0.05] hover:bg-white/[0.08] text-zinc-300 text-sm py-2.5 rounded-xl">Cancelar</button>
+            <button onClick={handleSubmit} disabled={loading}
+              className="flex-1 bg-orange-600 hover:bg-orange-500 disabled:opacity-40 text-white font-medium text-sm py-2.5 rounded-xl flex items-center justify-center gap-2">
+              {loading ? (<><svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>Registrando…</>) : 'Registrar equipo'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── EquipoCard ────────────────────────────────────────────────────────────────
+function EquipoCard({ equipo, onUpload }: { equipo: Equipo; onUpload: (doc: DocEquipo) => void }) {
+  const [open, setOpen] = useState(false)
+  const { label, color } = ESTADO_EQUIPO_LABEL[equipo.estado] ?? { label: equipo.estado, color: 'zinc' }
+  const docsVencidos  = equipo.documentos_equipo.filter(d => d.estado === 'VENCIDO').length
+  const docsPendientes = equipo.documentos_equipo.filter(d => d.estado === 'PENDIENTE').length
+
+  const DOC_ICON: Record<string, string> = { PENDIENTE: '○', CARGADO: '⏳', APROBADO: '✓', RECHAZADO: '✗', VENCIDO: '!' }
+  const DOC_CLS: Record<string, string>  = {
+    PENDIENTE: 'bg-zinc-500/15 text-zinc-500',
+    CARGADO:   'bg-blue-500/15 text-blue-400',
+    APROBADO:  'bg-green-500/15 text-green-400',
+    RECHAZADO: 'bg-red-500/15 text-red-400',
+    VENCIDO:   'bg-orange-500/15 text-orange-400',
+  }
+
+  return (
+    <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
+      <button className="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-white/[0.03] transition-colors"
+        onClick={() => setOpen(o => !o)}>
+        <span className="text-2xl leading-none shrink-0">{equipo.tipos_equipo.icono}</span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-white font-mono text-sm">{equipo.dominio}</span>
+            <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${estadoBadgeClass(color)}`}>{label}</span>
+            {docsVencidos > 0 && (
+              <span className="text-xs px-2 py-0.5 rounded-full border bg-orange-500/10 text-orange-400 border-orange-500/20 font-medium">
+                ⚠ {docsVencidos} vencido{docsVencidos > 1 ? 's' : ''}
+              </span>
+            )}
+            {docsPendientes > 0 && docsVencidos === 0 && (
+              <span className="text-xs text-zinc-500">{docsPendientes} pendiente{docsPendientes > 1 ? 's' : ''}</span>
+            )}
+          </div>
+          <p className="text-zinc-600 text-xs mt-0.5">
+            {equipo.tipos_equipo.nombre}
+            {equipo.marca && ` · ${equipo.marca}`}
+            {equipo.modelo && ` ${equipo.modelo}`}
+            {equipo.anio && ` (${equipo.anio})`}
+          </p>
+        </div>
+        <svg className={`shrink-0 text-zinc-600 transition-transform ${open ? 'rotate-180' : ''}`}
+          width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </button>
+
+      {open && (
+        <div className="border-t border-white/[0.06]">
+          {/* Datos seguro */}
+          {equipo.seguro_compania && (
+            <div className="px-4 py-2.5 border-b border-white/[0.04] bg-white/[0.02]">
+              <p className="text-zinc-500 text-xs">
+                <span className="text-zinc-400">Seguro:</span> {equipo.seguro_compania}
+                {equipo.seguro_poliza && ` · Póliza ${equipo.seguro_poliza}`}
+                {equipo.seguro_vto && ` · Vto: ${formatFecha(equipo.seguro_vto)}`}
+              </p>
+            </div>
+          )}
+          {/* Documentos */}
+          <div className="divide-y divide-white/[0.04]">
+            {equipo.documentos_equipo.length === 0 ? (
+              <div className="px-4 py-4 text-center"><p className="text-zinc-600 text-xs italic">Sin documentos configurados</p></div>
+            ) : equipo.documentos_equipo.map(doc => {
+              const puedeSubir = doc.estado !== 'APROBADO'
+              const diasV = doc.fecha_venc ? diasHasta(doc.fecha_venc) : null
+              const estaVencido = diasV !== null && diasV < 0
+              return (
+                <div key={doc.id} className="px-4 py-3 flex items-center gap-3">
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs font-bold ${DOC_CLS[doc.estado]}`}>
+                    {DOC_ICON[doc.estado]}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white text-sm truncate">{doc.documentos_requeridos_equipo.nombre}</p>
+                    <p className="text-zinc-600 text-xs">
+                      {doc.documentos_requeridos_equipo.tipo_vigencia === 'PERMANENTE' ? 'Permanente' :
+                       doc.fecha_venc ? `Vence ${formatFecha(doc.fecha_venc)}${estaVencido ? ' ⚠' : ''}` :
+                       'Sin fecha'}
+                    </p>
+                    {doc.observaciones && <p className="text-orange-400 text-xs italic mt-0.5">↳ {doc.observaciones}</p>}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {doc.archivo_url && (
+                      <a href={doc.archivo_url} target="_blank" rel="noopener noreferrer"
+                        className="text-zinc-500 hover:text-zinc-300 transition-colors p-1">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                          <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+                        </svg>
+                      </a>
+                    )}
+                    {puedeSubir && (
+                      <button onClick={() => onUpload(doc)}
+                        className="bg-white/[0.07] hover:bg-white/[0.12] border border-white/[0.1] text-zinc-300 text-xs px-3 py-1.5 rounded-lg transition-all">
+                        {doc.estado === 'RECHAZADO' || doc.estado === 'VENCIDO' ? 'Renovar' : 'Subir'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── SeccionEquipos ────────────────────────────────────────────────────────────
+function SeccionEquipos({ proveedorId }: { proveedorId: string }) {
+  const [equipos, setEquipos] = useState<Equipo[]>([])
+  const [tiposEquipo, setTiposEquipo] = useState<TipoEquipo[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showNuevo, setShowNuevo] = useState(false)
+  const [uploadDoc, setUploadDoc] = useState<DocEquipo | null>(null)
+
+  async function cargarDatos() {
+    setLoading(true)
+    const [{ data: tipos }, { data: eqs }] = await Promise.all([
+      supabase.from('tipos_equipo').select('id, nombre, icono').eq('activo', true).order('nombre'),
+      supabase.from('equipos_contratista').select(`
+        id, dominio, marca, modelo, anio,
+        seguro_compania, seguro_poliza, seguro_vto, estado,
+        tipos_equipo (id, nombre, icono),
+        documentos_equipo (
+          id, tipo_doc_id, estado, fecha_venc, archivo_url, observaciones,
+          documentos_requeridos_equipo (id, nombre, tipo_vigencia, obligatorio)
+        )
+      `).eq('proveedor_id', proveedorId).order('created_at', { ascending: false }),
+    ])
+    if (tipos) setTiposEquipo(tipos)
+    if (eqs) setEquipos(eqs as unknown as Equipo[])
+    setLoading(false)
+  }
+
+  useEffect(() => { cargarDatos() }, [proveedorId])
+
+  const totalVencidos = equipos.reduce((acc, eq) =>
+    acc + eq.documentos_equipo.filter(d => d.estado === 'VENCIDO').length, 0)
+
+  if (loading) return (
+    <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl px-5 py-10 text-center">
+      <div className="text-2xl mb-2">⚙️</div>
+      <p className="text-zinc-500 text-sm">Cargando equipos…</p>
+    </div>
+  )
+
+  return (
+    <div className="space-y-3">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <p className="text-zinc-500 text-xs">
+          {equipos.length} equipo{equipos.length !== 1 ? 's' : ''} registrado{equipos.length !== 1 ? 's' : ''}
+        </p>
+        <button onClick={() => setShowNuevo(true)}
+          className="bg-orange-600 hover:bg-orange-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+          <span>+</span> Agregar equipo
+        </button>
+      </div>
+
+      {/* Alerta vencidos */}
+      {totalVencidos > 0 && (
+        <div className="bg-orange-500/5 border border-orange-500/20 rounded-xl px-4 py-3">
+          <p className="text-orange-300 text-sm font-medium">⚠️ {totalVencidos} documento{totalVencidos > 1 ? 's' : ''} vencido{totalVencidos > 1 ? 's' : ''} en tus equipos</p>
+          <p className="text-orange-400/70 text-xs mt-0.5">Los equipos con documentos vencidos bloquean el acceso al establecimiento.</p>
+        </div>
+      )}
+
+      {/* Estado vacío */}
+      {equipos.length === 0 ? (
+        <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl px-5 py-10 text-center">
+          <div className="text-4xl mb-3">🚛</div>
+          <p className="text-zinc-400 text-sm font-medium">No tenés equipos registrados</p>
+          <p className="text-zinc-600 text-xs mt-1">Registrá tus vehículos y maquinaria para gestionar su documentación</p>
+          <button onClick={() => setShowNuevo(true)}
+            className="mt-4 bg-orange-600 hover:bg-orange-500 text-white text-xs font-medium px-4 py-2 rounded-lg">
+            Registrar primer equipo
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {equipos.map(eq => <EquipoCard key={eq.id} equipo={eq} onUpload={setUploadDoc}/>)}
+        </div>
+      )}
+
+      {showNuevo && (
+        <NuevoEquipoModal proveedorId={proveedorId} tiposEquipo={tiposEquipo}
+          onClose={() => setShowNuevo(false)} onSuccess={cargarDatos}/>
+      )}
+      {uploadDoc && (
+        <UploadEquipoModal doc={uploadDoc}
+          onClose={() => setUploadDoc(null)} onSuccess={cargarDatos}/>
+      )}
+    </div>
+  )
+}
+
+// ── PortalClient (componente principal) ──────────────────────────────────────
 export default function PortalClient({
   proveedor, docs, habilitacion, operarios, accesos,
-  historialPorDoc, miRol, visitasAuditoria, equiposSlot,
+  historialPorDoc, miRol, visitasAuditoria,
 }: Props) {
   const [seccion, setSeccion] = useState<Tab | null>(null)
   const [uploadModal, setUploadModal] = useState<{
@@ -100,7 +633,7 @@ export default function PortalClient({
 
   const seccionActual = SECCIONES.find(s => s.key === seccion)
 
-  // ── HOME: card resumen + grid íconos ─────────────────────────────────────
+  // ── HOME ──────────────────────────────────────────────────────────────────
   if (!seccion) {
     return (
       <div className="min-h-screen bg-[#0f1117] text-white">
@@ -155,7 +688,7 @@ export default function PortalClient({
             )}
           </div>
 
-          {/* Grid íconos 3 columnas */}
+          {/* Grid íconos */}
           <div className="grid grid-cols-3 gap-3">
             {SECCIONES.map(s => {
               const badge = badges[s.key]
@@ -178,7 +711,7 @@ export default function PortalClient({
     )
   }
 
-  // ── SECCIÓN: header con volver + contenido ────────────────────────────────
+  // ── SECCIONES ─────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-[#0f1117] text-white">
       <nav className="border-b border-white/[0.06] px-4 py-3 flex items-center gap-3 sticky top-0 bg-[#0f1117]/95 backdrop-blur z-40">
@@ -264,7 +797,7 @@ export default function PortalClient({
         )}
 
         {/* EQUIPOS */}
-        {seccion === 'equipos' && <div>{equiposSlot}</div>}
+        {seccion === 'equipos' && <SeccionEquipos proveedorId={proveedor.id}/>}
 
         {/* HISTORIAL */}
         {seccion === 'historial' && (
@@ -452,97 +985,6 @@ export default function PortalClient({
             )}
           </div>
         )}
-      </div>
-    </div>
-  )
-}
-
-// ── UploadModal ───────────────────────────────────────────────────────────────
-function UploadModal({ docId, nombre, proveedorId, tipoVigencia, fechaActual, onClose }: {
-  docId: string; nombre: string; proveedorId: string; tipoVigencia: string; fechaActual: string | null; onClose: () => void
-}) {
-  const necesitaFecha = tipoVigencia !== 'PERMANENTE'
-  const [fecha, setFecha] = useState(fechaActual ?? '')
-  const [archivo, setArchivo] = useState<File | null>(null)
-  const [uploading, setUploading] = useState(false)
-  const [error, setError] = useState('')
-  const [ok, setOk] = useState(false)
-  const hoyStr = new Date().toISOString().split('T')[0]
-
-  async function handleSubmit() {
-    if (!archivo) { setError('Seleccioná un archivo'); return }
-    if (necesitaFecha && !fecha) { setError('Ingresá la fecha de vencimiento'); return }
-    setUploading(true); setError('')
-    try {
-      const form = new FormData()
-      form.append('file', archivo); form.append('doc_id', docId); form.append('tipo', 'legajo')
-      if (necesitaFecha && fecha) form.append('fecha_venc', fecha)
-      const res = await fetch('/api/proveedor/upload', { method: 'POST', body: form })
-      const data = await res.json()
-      if (!data.ok) throw new Error(data.error ?? 'Error al subir')
-      setOk(true)
-      setTimeout(() => window.location.reload(), 1000)
-    } catch (err: any) { setError(err.message ?? 'Error al subir el archivo') }
-    finally { setUploading(false) }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.7)' }} onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="bg-[#1a1d27] border border-white/[0.1] rounded-2xl w-full max-w-sm shadow-2xl">
-        <div className="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between">
-          <div>
-            <h3 className="text-white font-medium text-sm">Subir documento</h3>
-            <p className="text-zinc-500 text-xs mt-0.5 truncate max-w-56">{nombre}</p>
-          </div>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 p-1">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
-          </button>
-        </div>
-        <div className="px-5 py-4 space-y-4">
-          {ok ? (
-            <div className="text-center py-4">
-              <div className="text-4xl mb-2">✅</div>
-              <p className="text-green-400 font-medium">¡Documento enviado!</p>
-              <p className="text-zinc-500 text-xs mt-1">Recargando…</p>
-            </div>
-          ) : (
-            <>
-              {necesitaFecha && (
-                <div>
-                  <label className="block text-zinc-400 text-xs mb-1.5">Fecha de vencimiento <span className="text-red-400">*</span></label>
-                  <input type="date" value={fecha} min={hoyStr} onChange={e => setFecha(e.target.value)}
-                    className="w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500/50"/>
-                </div>
-              )}
-              <div>
-                <label className="block text-zinc-400 text-xs mb-1.5">Archivo <span className="text-red-400">*</span> <span className="text-zinc-600">(PDF, JPG, PNG — máx. 10MB)</span></label>
-                <label className={`flex items-center gap-3 w-full border-2 border-dashed rounded-xl px-4 py-5 cursor-pointer transition-all ${archivo ? 'border-blue-500/40 bg-blue-500/5' : 'border-white/[0.1] bg-white/[0.03] hover:border-white/[0.2]'}`}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={archivo ? '#60a5fa' : '#52525b'} strokeWidth="1.5">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                    <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-                  </svg>
-                  <div className="flex-1 min-w-0">
-                    {archivo ? (<><p className="text-blue-300 text-sm font-medium truncate">{archivo.name}</p><p className="text-zinc-500 text-xs">{(archivo.size/1024).toFixed(0)} KB</p></>) :
-                               (<><p className="text-zinc-400 text-sm">Tocá para seleccionar</p><p className="text-zinc-600 text-xs">o arrastrá el archivo acá</p></>)}
-                  </div>
-                  {archivo && <button type="button" onClick={e => { e.preventDefault(); setArchivo(null) }} className="text-zinc-500 hover:text-zinc-300 shrink-0">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
-                  </button>}
-                  <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.webp" onChange={e => setArchivo(e.target.files?.[0] ?? null)}/>
-                </label>
-              </div>
-              {error && <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2"><p className="text-red-400 text-xs">{error}</p></div>}
-              <div className="flex gap-2 pt-1">
-                <button onClick={onClose} className="flex-1 bg-white/[0.05] hover:bg-white/[0.08] text-zinc-300 text-sm py-2.5 rounded-xl">Cancelar</button>
-                <button onClick={handleSubmit} disabled={uploading || !archivo || (necesitaFecha && !fecha)}
-                  className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-medium text-sm py-2.5 rounded-xl flex items-center justify-center gap-2">
-                  {uploading ? (<><svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>Subiendo…</>) : 'Enviar documento'}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
       </div>
     </div>
   )
