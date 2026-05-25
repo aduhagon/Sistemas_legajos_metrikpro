@@ -1,7 +1,6 @@
 import { createClient } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
 import PortalClient from './PortalClient'
-import EquiposProveedor from '@/components/EquiposProveedor'
 
 export default async function ProveedorPortalPage() {
   const supabase = createClient()
@@ -19,8 +18,6 @@ export default async function ProveedorPortalPage() {
     { data: docs },
     { data: habilitacion },
     { data: operarios },
-    { data: equipos },
-    { data: tiposEquipo },
     { data: visitasAuditoria },
   ] = await Promise.all([
     supabase
@@ -42,23 +39,6 @@ export default async function ProveedorPortalPage() {
       .from('proveedores_usuarios')
       .select('id, rol, nombre, cuil, activo, user_id')
       .eq('proveedor_id', provVerif.proveedor_id) : Promise.resolve({ data: [] }),
-    supabase
-      .from('equipos_contratista')
-      .select(`
-        id, dominio, marca, modelo, anio, estado,
-        tipos_equipo(nombre, icono),
-        documentos_equipo(
-          id, estado, fecha_venc, archivo_url, observaciones,
-          documentos_requeridos_equipo(nombre, tipo_vigencia, obligatorio)
-        )
-      `)
-      .eq('proveedor_id', provVerif.proveedor_id)
-      .order('created_at', { ascending: false }),
-    supabase
-      .from('tipos_equipo')
-      .select('id, nombre, icono')
-      .eq('activo', true)
-      .order('nombre'),
     supabase
       .from('visitas_auditoria')
       .select(`
@@ -115,13 +95,6 @@ export default async function ProveedorPortalPage() {
       historialPorDoc={historialPorDoc}
       miRol={provVerif.rol}
       visitasAuditoria={visitasAuditoria ?? []}
-      equiposSlot={
-        <EquiposProveedor
-          proveedorId={provVerif.proveedor_id}
-          equiposIniciales={(equipos ?? []) as any[]}
-          tiposEquipo={(tiposEquipo ?? []) as any[]}
-        />
-      }
     />
   )
 }
