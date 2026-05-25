@@ -1,11 +1,11 @@
 // ============================================================
 // /app/superadmin/alertas/AlertasTabla.tsx
-// Client Component — tabla de alertas con botón resolver/reabrir
+// Client Component — tabla + botón resolver + paginación
 // ============================================================
 'use client'
 
 import { Fragment, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 
 interface Alerta {
   id: string
@@ -34,11 +34,20 @@ function severidadBadge(sev: string) {
 export default function AlertasTabla({
   alertas,
   tenantNombres,
+  page,
+  totalPages,
+  total,
+  pageSize,
 }: {
   alertas: Alerta[]
   tenantNombres: Record<string, string>
+  page: number
+  totalPages: number
+  total: number
+  pageSize: number
 }) {
   const router = useRouter()
+  const sp = useSearchParams()
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -67,18 +76,18 @@ export default function AlertasTabla({
     }
   }
 
-  const noResueltas = alertas.filter(a => !a.resuelta).length
-  const criticas    = alertas.filter(a => !a.resuelta && a.severidad === 'critica').length
+  function irAPagina(p: number) {
+    const params = new URLSearchParams(sp.toString())
+    if (p <= 1) params.delete('page')
+    else        params.set('page', String(p))
+    router.push(`/superadmin/alertas?${params.toString()}`)
+  }
+
+  const desde = total === 0 ? 0 : (page - 1) * pageSize + 1
+  const hasta = Math.min(page * pageSize, total)
 
   return (
-    <div className="p-8">
-      <header className="mb-8">
-        <h1 className="text-2xl font-semibold text-white">Alertas</h1>
-        <p className="text-sm text-gray-400 mt-1">
-          {noResueltas} sin resolver · {criticas} crítica{criticas !== 1 ? 's' : ''}
-        </p>
-      </header>
-
+    <>
       {error && (
         <div className="mb-3 px-3 py-2 bg-red-500/10 border border-red-500/20 rounded text-sm text-red-400">
           {error}
@@ -141,11 +150,7 @@ export default function AlertasTabla({
                             : 'border-emerald-600/40 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10'
                         } ${loading === a.id ? 'opacity-50 cursor-wait' : ''}`}
                       >
-                        {loading === a.id
-                          ? '...'
-                          : a.resuelta
-                            ? 'Reabrir'
-                            : 'Resolver'}
+                        {loading === a.id ? '...' : a.resuelta ? 'Reabrir' : 'Resolver'}
                       </button>
                     </td>
                   </tr>
@@ -167,13 +172,41 @@ export default function AlertasTabla({
             {alertas.length === 0 && (
               <tr>
                 <td colSpan={6} className="px-4 py-12 text-center text-sm text-gray-500">
-                  No hay alertas registradas. Cuando algo falle (SMTP, cron, etc.) vas a verlo acá.
+                  No hay alertas con los filtros actuales.
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
-    </div>
+
+      {/* Paginación */}
+      {total > 0 && (
+        <div className="mt-4 flex items-center justify-between text-xs text-gray-400">
+          <p>Mostrando {desde}–{hasta} de {total}</p>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => irAPagina(page - 1)}
+                disabled={page <= 1}
+                className="px-3 py-1 rounded border border-gray-800 hover:border-gray-700 hover:text-gray-200 transition disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                ← Anterior
+              </button>
+              <span className="text-gray-500">
+                Página {page} de {totalPages}
+              </span>
+              <button
+                onClick={() => irAPagina(page + 1)}
+                disabled={page >= totalPages}
+                className="px-3 py-1 rounded border border-gray-800 hover:border-gray-700 hover:text-gray-200 transition disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                Siguiente →
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </>
   )
 }
