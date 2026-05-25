@@ -42,39 +42,15 @@ function checkRateLimit(
 export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname
 
-  // --- SEC-005: Rate limiting ---
-  if (request.method === 'POST') {
-    const rule = RL_RULES.find(r => r.pattern.test(path))
-    if (rule) {
-      const ip = getIP(request)
-      const key = `rl:${path.split('/')[2]}:${ip}`
-      const { allowed, remaining, resetAt } = checkRateLimit(key, rule.limit, rule.windowMs)
-      if (!allowed) {
-        return NextResponse.json(
-          { error: 'Demasiadas solicitudes. Intentá de nuevo en un momento.' },
-          {
-            status: 429,
-            headers: {
-              'Retry-After':           String(Math.ceil((resetAt - Date.now()) / 1000)),
-              'X-RateLimit-Limit':     String(rule.limit),
-              'X-RateLimit-Remaining': '0',
-              'X-RateLimit-Reset':     String(Math.ceil(resetAt / 1000)),
-            },
-          }
-        )
-      }
-    }
+  // ============================================================
+  // SUPERADMIN — verificar PRIMERO de todo
+  // El login es PÚBLICO y NO debe pasar por ninguna otra verificación
+  // ============================================================
+  if (path.startsWith('/superadmin/login')) {
+    return NextResponse.next()
   }
 
-  // ============================================================
-  // SUPERADMIN — verificar ANTES de cualquier otra lógica de auth
-  // ============================================================
   if (path.startsWith('/superadmin')) {
-    // Login público
-    if (path === '/superadmin/login') {
-      return NextResponse.next()
-    }
-
     let saResponse = NextResponse.next({ request: { headers: request.headers } })
 
     const saSupabase = createServerClient(
@@ -103,7 +79,6 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL('/superadmin/login', request.url))
     }
 
-    // Verificar rol superadmin con service_role (bypass RLS, sin importar módulo)
     const checkUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/usuarios_metrikpro?user_id=eq.${saUser.id}&rol=eq.superadmin&activo=eq.true&select=id&limit=1`
     const checkRes = await fetch(checkUrl, {
       headers: {
@@ -118,6 +93,30 @@ export async function middleware(request: NextRequest) {
     }
 
     return saResponse
+  }
+
+  // --- SEC-005: Rate limiting ---
+  if (request.method === 'POST') {
+    const rule = RL_RULES.find(r => r.pattern.test(path))
+    if (rule) {
+      const ip = getIP(request)
+      const key = `rl:${path.split('/')[2]}:${ip}`
+      const { allowed, remaining, resetAt } = checkRateLimit(key, rule.limit, rule.windowMs)
+      if (!allowed) {
+        return NextResponse.json(
+          { error: 'Demasiadas solicitudes. Intentá de nuevo en un momento.' },
+          {
+            status: 429,
+            headers: {
+              'Retry-After':           String(Math.ceil((resetAt - Date.now()) / 1000)),
+              'X-RateLimit-Limit':     String(rule.limit),
+              'X-RateLimit-Remaining': '0',
+              'X-RateLimit-Reset':     String(Math.ceil(resetAt / 1000)),
+            },
+          }
+        )
+      }
+    }
   }
 
   // --- Supabase auth (resto del sistema) ---
@@ -145,7 +144,6 @@ export async function middleware(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  // Rutas públicas — no requieren sesión
   const rutasPublicas = [
     '/',
     '/login',
@@ -161,7 +159,6 @@ export async function middleware(request: NextRequest) {
   ]
   const esPublica = rutasPublicas.some(r => path.startsWith(r))
 
-  // Sin sesión — redirigir al login correspondiente
   if (!user && !esPublica) {
     if (path.startsWith('/proveedor/portal')) {
       return NextResponse.redirect(new URL('/proveedor/login', request.url))
@@ -169,7 +166,6 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  // Con sesión — obtener rol una sola vez para todas las decisiones
   if (user) {
     const { data: usuarioData } = await supabase
       .from('usuarios')
@@ -179,24 +175,20 @@ export async function middleware(request: NextRequest) {
 
     const rol = usuarioData?.rol
 
-    // Desde /login → redirigir según rol
     if (path === '/login') {
       if (rol === 'operador_acceso') return NextResponse.redirect(new URL('/acceso', request.url))
       if (rol === 'auditor')         return NextResponse.redirect(new URL('/auditor', request.url))
       return NextResponse.redirect(new URL('/dashboard', request.url))
     }
 
-    // operador_acceso solo puede estar en /acceso
     if (rol === 'operador_acceso' && !path.startsWith('/acceso')) {
       return NextResponse.redirect(new URL('/acceso', request.url))
     }
 
-    // auditor solo puede estar en /auditor
     if (rol === 'auditor' && !path.startsWith('/auditor')) {
       return NextResponse.redirect(new URL('/auditor', request.url))
     }
 
-    // /acceso — solo operador_acceso y admin
     if (path.startsWith('/acceso') && rol && !['operador_acceso', 'admin'].includes(rol)) {
       return NextResponse.redirect(new URL('/dashboard', request.url))
     }
