@@ -1,11 +1,14 @@
 // src/app/dashboard/legajos/page.tsx
 import { createClient } from '@/lib/supabase-server'
+import { createAdminClient } from '@/lib/supabase-server-admin'
 import { redirect } from 'next/navigation'
 import { getGrupoId } from '@/lib/grupo'
 import LegajosClient from './LegajosClient'
 
 export default async function LegajosPage() {
-  const supabase = createClient()
+  const supabase      = createClient()
+  const supabaseAdmin = createAdminClient()
+
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
@@ -18,14 +21,12 @@ export default async function LegajosPage() {
     .eq('id', user.id)
     .single()
 
-  const rol            = usuarioData?.rol ?? 'evaluador'
-  const scope          = usuarioData?.supervisor_scope
+  const rol   = usuarioData?.rol ?? 'evaluador'
+  const scope = usuarioData?.supervisor_scope
 
-  // Roles sin restricción de scope → ven todos los proveedores del grupo
   const ROLES_SIN_SCOPE = ['admin', 'operador_acceso', 'auditor', 'operario']
   const tieneScope = !ROLES_SIN_SCOPE.includes(rol) && scope === 'asignados'
 
-  // Si tiene scope asignado → obtener los IDs de establecimientos permitidos
   let establecimientosFiltro: string[] | null = null
   if (tieneScope) {
     const { data: estabsAsignados } = await supabase
@@ -36,8 +37,11 @@ export default async function LegajosPage() {
     establecimientosFiltro = (estabsAsignados ?? []).map((r: any) => r.establecimiento_id)
   }
 
-  // Query de proveedores — agrega email para búsqueda
-  let query = supabase
+  // ── Query de proveedores con admin client (bypassa RLS) ──────────────────
+  // Necesario porque el JWT del evaluador/admin no siempre propaga auth.uid()
+  // correctamente en el contexto SSR de Next.js 15, causando que RLS filtre
+  // registros válidos. La autorización real está en el check de usuario arriba.
+  let query = supabaseAdmin
     .from('proveedores')
     .select(`
       id, razon_social, cuit, email, tipo_proveedor, estado, created_at,
@@ -64,13 +68,13 @@ export default async function LegajosPage() {
     query = query.in('establecimiento_id', establecimientosFiltro)
   }
 
-  // Query de establecimientos — filtrados si hay scope
-  let qEstabs = supabase
+  let qEstabs = supabaseAdmin
     .from('establecimientos')
     .select('id, nombre')
     .eq('grupo_id', grupoId)
     .eq('activo', true)
     .order('nombre')
+
   if (tieneScope && establecimientosFiltro !== null && establecimientosFiltro.length > 0) {
     qEstabs = qEstabs.in('id', establecimientosFiltro)
   }
@@ -81,7 +85,7 @@ export default async function LegajosPage() {
     { data: establecimientos },
   ] = await Promise.all([
     query,
-    supabase
+    supabaseAdmin
       .from('rubros')
       .select('id, nombre')
       .eq('grupo_id', grupoId)
