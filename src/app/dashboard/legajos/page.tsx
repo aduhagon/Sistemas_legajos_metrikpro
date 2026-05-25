@@ -36,11 +36,11 @@ export default async function LegajosPage() {
     establecimientosFiltro = (estabsAsignados ?? []).map((r: any) => r.establecimiento_id)
   }
 
-  // Query de proveedores — con o sin filtro de establecimiento
+  // Query de proveedores — agrega email para búsqueda
   let query = supabase
     .from('proveedores')
     .select(`
-      id, razon_social, cuit, tipo_proveedor, estado, created_at,
+      id, razon_social, cuit, email, tipo_proveedor, estado, created_at,
       establecimiento_id,
       rubros(nombre),
       proveedor_rubros(rubros(id, nombre, codigo)),
@@ -49,14 +49,13 @@ export default async function LegajosPage() {
     .eq('grupo_id', grupoId)
     .order('created_at', { ascending: false })
 
-  // Aplicar filtro si el usuario tiene scope restringido
   if (tieneScope && establecimientosFiltro !== null) {
     if (establecimientosFiltro.length === 0) {
-      // Sin establecimientos asignados → no ve nada
       return (
         <LegajosClient
           proveedores={[]}
           rubros={[]}
+          establecimientos={[]}
           grupoId={grupoId}
           scopeRestringido={true}
         />
@@ -65,7 +64,22 @@ export default async function LegajosPage() {
     query = query.in('establecimiento_id', establecimientosFiltro)
   }
 
-  const [{ data: proveedores }, { data: rubros }] = await Promise.all([
+  // Query de establecimientos — filtrados si hay scope
+  let qEstabs = supabase
+    .from('establecimientos')
+    .select('id, nombre')
+    .eq('grupo_id', grupoId)
+    .eq('activo', true)
+    .order('nombre')
+  if (tieneScope && establecimientosFiltro !== null && establecimientosFiltro.length > 0) {
+    qEstabs = qEstabs.in('id', establecimientosFiltro)
+  }
+
+  const [
+    { data: proveedores },
+    { data: rubros },
+    { data: establecimientos },
+  ] = await Promise.all([
     query,
     supabase
       .from('rubros')
@@ -73,12 +87,14 @@ export default async function LegajosPage() {
       .eq('grupo_id', grupoId)
       .eq('activo', true)
       .order('codigo'),
+    qEstabs,
   ])
 
   return (
     <LegajosClient
       proveedores={(proveedores ?? []) as any[]}
       rubros={rubros ?? []}
+      establecimientos={establecimientos ?? []}
       grupoId={grupoId}
       scopeRestringido={tieneScope}
     />

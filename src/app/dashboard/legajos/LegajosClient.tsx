@@ -1,7 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
-import Link from 'next/link'
+import { useState, useMemo, useEffect } from 'react'
 import { supabase } from '@/lib/supabase-client'
 
 type RubroRef = { rubros: { id: string; nombre: string; codigo: number } | null }
@@ -10,16 +9,20 @@ type Proveedor = {
   id: string
   razon_social: string
   cuit: string
+  email: string | null
   tipo_proveedor: string
   estado: string
   created_at: string
+  establecimiento_id: string | null
   rubros: { nombre: string } | null
   proveedor_rubros: RubroRef[]
   documentos_legajo: { id: string; estado: string; fecha_venc: string | null }[]
 }
 
 type SortKey = 'razon_social' | 'estado' | 'created_at' | 'docs' | 'vencimiento'
-type SortDir  = 'asc' | 'desc'
+type SortDir = 'asc' | 'desc'
+type FiltroVenc = 'TODOS' | 'SIN_VENCER' | 'POR_VENCER' | 'VENCIDOS'
+type Vista = 'lista' | 'grid'
 
 const ESTADO_CFG: Record<string, { label: string; color: string }> = {
   PENDIENTE:   { label: 'Pendiente',   color: 'yellow' },
@@ -28,6 +31,8 @@ const ESTADO_CFG: Record<string, { label: string; color: string }> = {
   RECHAZADO:   { label: 'Rechazado',   color: 'red'    },
   SUSPENDIDO:  { label: 'Suspendido',  color: 'zinc'   },
 }
+
+const PAGE_SIZE = 50
 
 function estadoClass(color: string) {
   return color === 'yellow' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
@@ -131,7 +136,6 @@ function ModalNuevoProveedor({
 
       if (errFn || data?.error) throw new Error(data?.error ?? errFn?.message)
 
-      // Rubros adicionales en proveedor_rubros
       if (form.rubro_ids.length > 1 && data?.proveedor_id) {
         await supabase.from('proveedor_rubros').insert(
           form.rubro_ids.slice(1).map(rid => ({
@@ -142,7 +146,6 @@ function ModalNuevoProveedor({
         )
       }
 
-      // Navegar directo al nuevo legajo
       if (data?.proveedor_id) {
         window.location.href = `/dashboard/legajos/${data.proveedor_id}`
       } else {
@@ -159,8 +162,6 @@ function ModalNuevoProveedor({
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-[#12151e] border border-white/[0.08] rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-
-        {/* Header */}
         <div className="px-6 py-4 border-b border-white/[0.06] flex items-center justify-between sticky top-0 bg-[#12151e]">
           <h2 className="text-white font-medium">Nuevo proveedor</h2>
           <button onClick={onClose} className="text-zinc-500 hover:text-white transition-colors">
@@ -171,8 +172,6 @@ function ModalNuevoProveedor({
         </div>
 
         <div className="px-6 py-5 space-y-4">
-
-          {/* Razón social */}
           <div>
             <label className="block text-zinc-400 text-xs mb-1.5">Razón social *</label>
             <input value={form.razon_social}
@@ -180,7 +179,6 @@ function ModalNuevoProveedor({
               placeholder="Empresa S.A." autoFocus className={inputCls}/>
           </div>
 
-          {/* CUIT + Tipo */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-zinc-400 text-xs mb-1.5">CUIT *</label>
@@ -199,7 +197,6 @@ function ModalNuevoProveedor({
             </div>
           </div>
 
-          {/* Email + Teléfono */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-zinc-400 text-xs mb-1.5">Email *</label>
@@ -215,7 +212,6 @@ function ModalNuevoProveedor({
             </div>
           </div>
 
-          {/* Rubros multi-select */}
           <div>
             <label className="block text-zinc-400 text-xs mb-1.5">
               Rubro(s) *
@@ -283,7 +279,6 @@ function ModalInvitar({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-[#12151e] border border-white/[0.08] rounded-2xl w-full max-w-md">
-
         <div className="px-6 py-4 border-b border-white/[0.06] flex items-center justify-between">
           <h2 className="text-white font-medium">Invitar proveedor</h2>
           <button onClick={onClose} className="text-zinc-500 hover:text-white transition-colors">
@@ -298,7 +293,6 @@ function ModalInvitar({ onClose }: { onClose: () => void }) {
             Compartí este link con el proveedor para que complete su registro y cargue su documentación de forma autónoma.
           </p>
 
-          {/* Link */}
           <div className="bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-3 flex items-center gap-3">
             <span className="text-zinc-300 text-sm flex-1 truncate font-mono text-xs">{url}</span>
             <button onClick={copiar}
@@ -325,7 +319,6 @@ function ModalInvitar({ onClose }: { onClose: () => void }) {
             </button>
           </div>
 
-          {/* También abrir en nueva pestaña */}
           <div className="flex gap-3">
             <a href={url} target="_blank" rel="noopener noreferrer"
               className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border border-white/[0.08] text-zinc-400 hover:text-white text-sm transition-colors">
@@ -354,36 +347,60 @@ function ModalInvitar({ onClose }: { onClose: () => void }) {
 export default function LegajosClient({
   proveedores,
   rubros,
+  establecimientos,
   grupoId,
   scopeRestringido = false,
 }: {
   proveedores: Proveedor[]
   rubros: { id: string; nombre: string }[]
+  establecimientos: { id: string; nombre: string }[]
   grupoId: string
   scopeRestringido?: boolean
 }) {
-  const [busqueda, setBusqueda]         = useState('')
-  const [filtroEstado, setFiltroEstado] = useState('TODOS')
-  const [filtroRubro, setFiltroRubro]   = useState('TODOS')
-  const [sortKey, setSortKey]           = useState<SortKey>('created_at')
-  const [sortDir, setSortDir]           = useState<SortDir>('desc')
-  const [modalNuevo, setModalNuevo]     = useState(false)
-  const [modalInvitar, setModalInvitar] = useState(false)
+  // ── Estado local (no persistido) ──
+  const [busquedaInput, setBusquedaInput] = useState('')
+  const [busqueda, setBusqueda]           = useState('')
+  const [filtroEstado, setFiltroEstado]   = useState('TODOS')
+  const [filtroRubro, setFiltroRubro]     = useState('TODOS')
+  const [filtroEstab, setFiltroEstab]     = useState('TODOS')
+  const [filtroVenc, setFiltroVenc]       = useState<FiltroVenc>('TODOS')
+  const [sortKey, setSortKey]             = useState<SortKey>('created_at')
+  const [sortDir, setSortDir]             = useState<SortDir>('desc')
+  const [vista, setVista]                 = useState<Vista>('lista')
+  const [pagina, setPagina]               = useState(1)
+  const [modalNuevo, setModalNuevo]       = useState(false)
+  const [modalInvitar, setModalInvitar]   = useState(false)
+  const [filtrosOpen, setFiltrosOpen]     = useState(false)
+
+  // Debounce de búsqueda (250ms)
+  useEffect(() => {
+    const t = setTimeout(() => setBusqueda(busquedaInput), 250)
+    return () => clearTimeout(t)
+  }, [busquedaInput])
+
+  // Cualquier cambio de filtro/búsqueda resetea a la página 1
+  useEffect(() => {
+    setPagina(1)
+  }, [busqueda, filtroEstado, filtroRubro, filtroEstab, filtroVenc, sortKey, sortDir])
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortKey(key); setSortDir('asc') }
   }
 
+  // Filtrar proveedores
   const filtrados = useMemo(() => {
     let lista = [...proveedores]
 
     if (busqueda.trim()) {
-      const q = busqueda.toLowerCase().replace(/[-\s]/g, '')
-      lista = lista.filter(p =>
-        p.razon_social.toLowerCase().includes(busqueda.toLowerCase()) ||
-        p.cuit.replace(/[-\s]/g, '').includes(q)
-      )
+      const q = busqueda.toLowerCase()
+      const qNum = q.replace(/[-\s]/g, '')
+      lista = lista.filter(p => {
+        if (p.razon_social.toLowerCase().includes(q)) return true
+        if (p.cuit.replace(/[-\s]/g, '').includes(qNum)) return true
+        if (p.email && p.email.toLowerCase().includes(q)) return true
+        return false
+      })
     }
 
     if (filtroEstado !== 'TODOS') lista = lista.filter(p => p.estado === filtroEstado)
@@ -392,6 +409,21 @@ export default function LegajosClient({
       lista = lista.filter(p => getRubrosProveedor(p).includes(filtroRubro))
     }
 
+    if (filtroEstab !== 'TODOS') {
+      lista = lista.filter(p => p.establecimiento_id === filtroEstab)
+    }
+
+    if (filtroVenc !== 'TODOS') {
+      lista = lista.filter(p => {
+        const venc = proximoVencimiento(p.documentos_legajo)
+        if (filtroVenc === 'SIN_VENCER') return venc === null || venc > 30
+        if (filtroVenc === 'POR_VENCER') return venc !== null && venc >= 0 && venc <= 30
+        if (filtroVenc === 'VENCIDOS')   return venc !== null && venc < 0
+        return true
+      })
+    }
+
+    // Ordenamiento
     lista.sort((a, b) => {
       let va: any, vb: any
       if (sortKey === 'razon_social') { va = a.razon_social.toLowerCase(); vb = b.razon_social.toLowerCase() }
@@ -414,34 +446,48 @@ export default function LegajosClient({
     })
 
     return lista
-  }, [proveedores, busqueda, filtroEstado, filtroRubro, sortKey, sortDir])
+  }, [proveedores, busqueda, filtroEstado, filtroRubro, filtroEstab, filtroVenc, sortKey, sortDir])
 
+  // Paginación
+  const totalPaginas = Math.max(1, Math.ceil(filtrados.length / PAGE_SIZE))
+  const inicio = (pagina - 1) * PAGE_SIZE
+  const fin    = Math.min(pagina * PAGE_SIZE, filtrados.length)
+  const visibles = filtrados.slice(inicio, fin)
+
+  // Conteo por estado
   const conteos = useMemo(() => {
     const c: Record<string, number> = {}
     for (const p of proveedores) { c[p.estado] = (c[p.estado] ?? 0) + 1 }
     return c
   }, [proveedores])
 
-  const hayFiltros = busqueda || filtroEstado !== 'TODOS' || filtroRubro !== 'TODOS'
+  const hayFiltros =
+    busqueda || filtroEstado !== 'TODOS' || filtroRubro !== 'TODOS' ||
+    filtroEstab !== 'TODOS' || filtroVenc !== 'TODOS'
+
+  const cantidadFiltrosAvanzados =
+    (filtroRubro !== 'TODOS' ? 1 : 0) +
+    (filtroEstab !== 'TODOS' ? 1 : 0) +
+    (filtroVenc  !== 'TODOS' ? 1 : 0)
 
   function limpiar() {
-    setBusqueda(''); setFiltroEstado('TODOS'); setFiltroRubro('TODOS')
+    setBusquedaInput(''); setBusqueda('')
+    setFiltroEstado('TODOS'); setFiltroRubro('TODOS'); setFiltroEstab('TODOS'); setFiltroVenc('TODOS')
   }
 
   return (
     <div>
       {/* ── Header ── */}
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-medium">Legajos de proveedores</h1>
           <p className="text-zinc-500 text-sm mt-0.5">
             {filtrados.length === proveedores.length
-              ? `${proveedores.length} registros`
+              ? `${proveedores.length} registro${proveedores.length !== 1 ? 's' : ''}`
               : `${filtrados.length} de ${proveedores.length} registros`}
           </p>
         </div>
 
-        {/* Botones de alta */}
         <div className="flex items-center gap-2">
           <button onClick={() => setModalInvitar(true)}
             className="flex items-center gap-2 bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.1] text-zinc-300 text-sm font-medium px-4 py-2 rounded-xl transition-colors">
@@ -461,7 +507,7 @@ export default function LegajosClient({
         </div>
       </div>
 
-      {/* Aviso de scope restringido */}
+      {/* Aviso de scope */}
       {scopeRestringido && (
         <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl px-4 py-3 mb-4 flex items-center gap-2">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" className="shrink-0">
@@ -475,18 +521,18 @@ export default function LegajosClient({
         </div>
       )}
 
-      {/* Búsqueda + filtro rubro */}
-      <div className="flex gap-2 mb-3">
-        <div className="relative flex-1">
+      {/* ── Búsqueda + Más filtros + Toggle vista ── */}
+      <div className="flex gap-2 mb-3 flex-wrap">
+        <div className="relative flex-1 min-w-[260px]">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#52525b" strokeWidth="2"
             className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
             <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
           </svg>
-          <input value={busqueda} onChange={e => setBusqueda(e.target.value)}
-            placeholder="Buscar por nombre o CUIT..."
-            className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl pl-9 pr-4 py-2.5 text-white placeholder:text-zinc-600 text-sm focus:outline-none focus:border-blue-500/50 transition-all"/>
-          {busqueda && (
-            <button onClick={() => setBusqueda('')}
+          <input value={busquedaInput} onChange={e => setBusquedaInput(e.target.value)}
+            placeholder="Buscar por nombre, CUIT o email..."
+            className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl pl-9 pr-9 py-2.5 text-white placeholder:text-zinc-600 text-sm focus:outline-none focus:border-blue-500/50 transition-all"/>
+          {busquedaInput && (
+            <button onClick={() => { setBusquedaInput(''); setBusqueda('') }}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M18 6 6 18M6 6l12 12"/>
@@ -494,14 +540,85 @@ export default function LegajosClient({
             </button>
           )}
         </div>
-        <select value={filtroRubro} onChange={e => setFiltroRubro(e.target.value)}
-          className="bg-white/[0.04] border border-white/[0.08] rounded-xl px-3 py-2.5 text-sm text-zinc-300 focus:outline-none focus:border-blue-500/50 appearance-none cursor-pointer">
-          <option value="TODOS">Todos los rubros</option>
-          {rubros.map(r => <option key={r.id} value={r.nombre}>{r.nombre}</option>)}
-        </select>
+
+        <button onClick={() => setFiltrosOpen(o => !o)}
+          className={`flex items-center gap-2 border rounded-xl px-3 py-2.5 text-sm transition-all ${
+            filtrosOpen || cantidadFiltrosAvanzados > 0
+              ? 'bg-blue-500/10 border-blue-500/30 text-blue-300'
+              : 'bg-white/[0.04] border-white/[0.08] text-zinc-300 hover:border-white/[0.15]'
+          }`}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+          </svg>
+          Filtros
+          {cantidadFiltrosAvanzados > 0 && (
+            <span className="bg-blue-500/30 text-blue-200 text-[10px] px-1.5 py-0.5 rounded-full font-semibold">
+              {cantidadFiltrosAvanzados}
+            </span>
+          )}
+        </button>
+
+        {/* Toggle vista */}
+        <div className="flex bg-white/[0.04] border border-white/[0.08] rounded-xl p-0.5">
+          <button onClick={() => setVista('lista')}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+              vista === 'lista' ? 'bg-white/[0.08] text-white' : 'text-zinc-500 hover:text-zinc-300'
+            }`}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/>
+              <line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/>
+              <line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+            </svg>
+            Lista
+          </button>
+          <button onClick={() => setVista('grid')}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+              vista === 'grid' ? 'bg-white/[0.08] text-white' : 'text-zinc-500 hover:text-zinc-300'
+            }`}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+              <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+            </svg>
+            Grid
+          </button>
+        </div>
       </div>
 
-      {/* Filtros estado */}
+      {/* ── Panel de filtros avanzados (colapsable) ── */}
+      {filtrosOpen && (
+        <div className="bg-white/[0.03] border border-white/[0.08] rounded-xl p-4 mb-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-zinc-500 text-xs mb-1.5">Rubro</label>
+            <select value={filtroRubro} onChange={e => setFiltroRubro(e.target.value)}
+              className="w-full bg-[#1a1d27] border border-white/[0.1] rounded-xl px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-blue-500/50">
+              <option value="TODOS">Todos los rubros</option>
+              {rubros.map(r => <option key={r.id} value={r.nombre}>{r.nombre}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-zinc-500 text-xs mb-1.5">Establecimiento</label>
+            <select value={filtroEstab} onChange={e => setFiltroEstab(e.target.value)}
+              className="w-full bg-[#1a1d27] border border-white/[0.1] rounded-xl px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-blue-500/50">
+              <option value="TODOS">Todos los establecimientos</option>
+              {establecimientos.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-zinc-500 text-xs mb-1.5">Vencimientos</label>
+            <select value={filtroVenc} onChange={e => setFiltroVenc(e.target.value as FiltroVenc)}
+              className="w-full bg-[#1a1d27] border border-white/[0.1] rounded-xl px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-blue-500/50">
+              <option value="TODOS">Todos</option>
+              <option value="SIN_VENCER">Sin vencer (más de 30 días)</option>
+              <option value="POR_VENCER">Por vencer (en 30 días)</option>
+              <option value="VENCIDOS">Vencidos</option>
+            </select>
+          </div>
+        </div>
+      )}
+
+      {/* ── Chips de estado ── */}
       <div className="flex items-center gap-1.5 mb-4 flex-wrap">
         {(['TODOS', 'PENDIENTE', 'EN_REVISION', 'APROBADO', 'RECHAZADO', 'SUSPENDIDO'] as const).map(e => {
           const cfg = e === 'TODOS' ? null : ESTADO_CFG[e]
@@ -530,7 +647,7 @@ export default function LegajosClient({
         )}
       </div>
 
-      {/* Tabla */}
+      {/* ── Resultados ── */}
       {filtrados.length === 0 ? (
         <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-16 text-center">
           {hayFiltros ? (
@@ -554,7 +671,8 @@ export default function LegajosClient({
             </>
           )}
         </div>
-      ) : (
+      ) : vista === 'lista' ? (
+        // ── VISTA LISTA (tabla) ──
         <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
           <table className="w-full">
             <thead>
@@ -596,7 +714,7 @@ export default function LegajosClient({
               </tr>
             </thead>
             <tbody>
-              {filtrados.map((p, i) => {
+              {visibles.map((p, i) => {
                 const cfg = ESTADO_CFG[p.estado] ?? ESTADO_CFG.PENDIENTE
                 const docs = p.documentos_legajo
                 const docsOk = docs.filter(d => d.estado === 'APROBADO').length
@@ -609,8 +727,7 @@ export default function LegajosClient({
                 return (
                   <tr key={p.id}
                     onClick={() => window.location.href = `/dashboard/legajos/${p.id}`}
-                    className={`border-b border-white/[0.04] hover:bg-white/[0.025] transition-colors cursor-pointer ${i === filtrados.length - 1 ? 'border-0' : ''}`}>
-
+                    className={`border-b border-white/[0.04] hover:bg-white/[0.025] transition-colors cursor-pointer ${i === visibles.length - 1 ? 'border-0' : ''}`}>
                     <td className="px-6 py-3.5">
                       <p className="text-sm font-medium text-white">{p.razon_social}</p>
                     </td>
@@ -650,6 +767,94 @@ export default function LegajosClient({
               })}
             </tbody>
           </table>
+        </div>
+      ) : (
+        // ── VISTA GRID (cards) ──
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+          {visibles.map(p => {
+            const cfg = ESTADO_CFG[p.estado] ?? ESTADO_CFG.PENDIENTE
+            const docs = p.documentos_legajo
+            const docsOk = docs.filter(d => d.estado === 'APROBADO').length
+            const venc = proximoVencimiento(docs)
+            const rubrosNombres = getRubrosProveedor(p)
+            const inicial = p.razon_social.charAt(0).toUpperCase()
+
+            return (
+              <div key={p.id}
+                onClick={() => window.location.href = `/dashboard/legajos/${p.id}`}
+                className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-4 hover:bg-white/[0.05] hover:border-white/[0.12] transition-all cursor-pointer flex flex-col gap-3">
+
+                {/* Header con inicial + estado */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-blue-500/15 border border-blue-500/20 flex items-center justify-center shrink-0">
+                      <span className="text-blue-300 font-semibold text-sm">{inicial}</span>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-white truncate">{p.razon_social}</p>
+                      <p className="text-xs text-zinc-500 font-mono truncate">{p.cuit}</p>
+                    </div>
+                  </div>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full border shrink-0 ${estadoClass(cfg.color)}`}>
+                    {cfg.label}
+                  </span>
+                </div>
+
+                {/* Rubros */}
+                {rubrosNombres.length > 0 && (
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {rubrosNombres.slice(0, 2).map(r => (
+                      <span key={r} className="text-[10px] text-zinc-400 bg-white/[0.04] border border-white/[0.06] px-1.5 py-0.5 rounded">
+                        {r}
+                      </span>
+                    ))}
+                    {rubrosNombres.length > 2 && (
+                      <span className="text-[10px] text-zinc-500 bg-white/[0.06] px-1.5 py-0.5 rounded">
+                        +{rubrosNombres.length - 2}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Stats: docs + vencimiento */}
+                <div className="flex items-center justify-between pt-2 border-t border-white/[0.05]">
+                  <div className="flex items-center gap-3">
+                    <div>
+                      <p className="text-[10px] text-zinc-600 uppercase tracking-wider">Docs</p>
+                      <p className="text-sm font-medium text-white">{docsOk}/{docs.length}</p>
+                    </div>
+                    {venc !== null && (
+                      <div>
+                        <p className="text-[10px] text-zinc-600 uppercase tracking-wider">Vence</p>
+                        <VencimientoBadge dias={venc}/>
+                      </div>
+                    )}
+                  </div>
+                  <span className="text-blue-400 text-xs">Ver →</span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* ── Paginación ── */}
+      {filtrados.length > 0 && (
+        <div className="mt-4 flex items-center justify-between text-xs text-zinc-500 flex-wrap gap-3">
+          <p>Mostrando {inicio + 1}–{fin} de {filtrados.length}</p>
+          {totalPaginas > 1 && (
+            <div className="flex items-center gap-2">
+              <button onClick={() => setPagina(p => Math.max(1, p - 1))} disabled={pagina <= 1}
+                className="px-3 py-1 rounded-lg border border-white/[0.08] hover:border-white/[0.15] hover:text-zinc-300 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+                ← Anterior
+              </button>
+              <span className="text-zinc-600">Página {pagina} de {totalPaginas}</span>
+              <button onClick={() => setPagina(p => Math.min(totalPaginas, p + 1))} disabled={pagina >= totalPaginas}
+                className="px-3 py-1 rounded-lg border border-white/[0.08] hover:border-white/[0.15] hover:text-zinc-300 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+                Siguiente →
+              </button>
+            </div>
+          )}
         </div>
       )}
 
