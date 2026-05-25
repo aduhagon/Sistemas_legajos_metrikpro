@@ -1,9 +1,10 @@
 // ============================================================
 // /app/superadmin/tenants/page.tsx
-// Lista de todos los tenants con su estado
+// Lista de todos los tenants + botón "Crear tenant"
 // ============================================================
 
 import Link from 'next/link'
+import CrearTenantModal from './CrearTenantModal'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,12 +41,10 @@ async function fetchSupabase<T>(path: string): Promise<T> {
 }
 
 export default async function TenantsPage() {
-  // 1. Lista de tenants
   const tenants = await fetchSupabase<Tenant[]>(
     'grupos_trabajo?select=id,nombre,slug,activo,created_at&order=nombre.asc'
   )
 
-  // 2. Conteo de módulos activos por tenant
   const modulos = await fetchSupabase<ModuloRow[]>(
     'grupos_modulos?select=grupo_id,activo'
   )
@@ -57,7 +56,6 @@ export default async function TenantsPage() {
     modulosPorTenant.set(m.grupo_id, acc)
   }
 
-  // 3. Conteo de alertas no resueltas por tenant
   const alertas = await fetchSupabase<AlertaRow[]>(
     'superadmin_alertas?select=grupo_id,severidad,resuelta&resuelta=eq.false'
   )
@@ -71,11 +69,14 @@ export default async function TenantsPage() {
 
   return (
     <div className="p-8">
-      <header className="mb-8">
-        <h1 className="text-2xl font-semibold text-white">Tenants</h1>
-        <p className="text-sm text-gray-400 mt-1">
-          {tenants.length} tenant{tenants.length !== 1 ? 's' : ''} registrado{tenants.length !== 1 ? 's' : ''}
-        </p>
+      <header className="mb-8 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-white">Tenants</h1>
+          <p className="text-sm text-gray-400 mt-1">
+            {tenants.length} tenant{tenants.length !== 1 ? 's' : ''} registrado{tenants.length !== 1 ? 's' : ''}
+          </p>
+        </div>
+        <CrearTenantModal />
       </header>
 
       <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
@@ -140,7 +141,7 @@ export default async function TenantsPage() {
             {tenants.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-4 py-12 text-center text-sm text-gray-500">
-                  No hay tenants registrados.
+                  No hay tenants registrados. Clickeá "Crear tenant" para empezar.
                 </td>
               </tr>
             )}
