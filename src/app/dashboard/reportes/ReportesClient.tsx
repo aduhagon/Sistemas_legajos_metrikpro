@@ -315,7 +315,7 @@ export default function ReportesClient({
                         style={{ width: `${stats.total > 0 ? ((count as number) / stats.total) * 100 : 0}%` }}/>
                     </div>
                     <span className="text-zinc-500 text-xs w-6 text-right">{count as number}</span>
-                  </div>
+                  </details>
                 ))}
             </div>
           </div>
@@ -461,28 +461,48 @@ export default function ReportesClient({
               <div className="px-5 py-3 border-b border-red-500/10">
                 <span className="text-red-400 text-sm font-medium">🔴 Vencidos — legajos ({vencidos.length})</span>
               </div>
-              <div className="divide-y divide-white/[0.04]">
-                {vencidos.map((d: any) => {
-                  const dias = Math.abs(diasHasta(d.fecha_venc))
-                  return (
-                    <div key={d.id} className="px-5 py-3 flex items-center justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <Link href={`/dashboard/legajos/${d.proveedores?.id}`} className="text-white text-sm hover:text-blue-300 transition-colors font-medium">
-                          {d.proveedores?.razon_social}
+                  {(() => {
+                const grupos = new Map<string, { nombre: string; id: string; docs: any[] }>()
+                for (const d of vencidos) {
+                  const key = d.proveedores?.id ?? 'sin-prov'
+                  if (!grupos.has(key)) grupos.set(key, { nombre: d.proveedores?.razon_social ?? '—', id: d.proveedores?.id, docs: [] })
+                  grupos.get(key)!.docs.push(d)
+                }
+                return Array.from(grupos.entries()).map(([key, g], gi) => (
+                  <details key={key} className={`group ${gi > 0 ? 'border-t border-white/[0.04]' : ''}`} open>
+                    <summary className="px-5 py-2.5 flex items-center justify-between cursor-pointer list-none hover:bg-white/[0.02] transition-colors">
+                      <div className="flex items-center gap-2">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                          className="text-zinc-600 group-open:rotate-90 transition-transform shrink-0">
+                          <polyline points="9 18 15 12 9 6"/>
+                        </svg>
+                        <Link href={`/dashboard/legajos/${g.id}`} onClick={e => e.stopPropagation()}
+                          className="text-white text-sm font-medium hover:text-blue-300 transition-colors">
+                          {g.nombre}
                         </Link>
-                        <p className="text-zinc-500 text-xs">{d.documentos_requeridos?.nombre}</p>
                       </div>
-                      <div className="flex items-center gap-4 shrink-0">
-                        <BtnRecordatorio proveedorId={d.proveedores?.id} />
-                        <div className="text-right">
-                          <p className="text-red-400 text-xs font-medium">Venció el {formatFechaVenc(d.fecha_venc)}</p>
-                          <p className="text-red-600 text-xs">hace {dias} día{dias !== 1 ? 's' : ''}</p>
-                        </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <BtnRecordatorio proveedorId={g.id} />
+                        <span className="text-zinc-600 text-xs">{g.docs.length} doc{g.docs.length !== 1 ? 's' : ''}</span>
                       </div>
+                    </summary>
+                    <div className="divide-y divide-white/[0.03]">
+                      {g.docs.map((d: any) => {
+                        const dias = Math.abs(diasHasta(d.fecha_venc))
+                        return (
+                          <div key={d.id} className="px-5 pl-10 py-2.5 flex items-center justify-between gap-4">
+                            <p className="text-zinc-400 text-xs flex-1">{d.documentos_requeridos?.nombre}</p>
+                            <div className="text-right shrink-0">
+                              <p className="text-red-400 text-xs font-medium">Venció el {formatFechaVenc(d.fecha_venc)}</p>
+                              <p className="text-red-600 text-xs">hace {dias} día{dias !== 1 ? 's' : ''}</p>
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
-                  )
-                })}
-              </div>
+                  </details>
+                ))
+              })()}
             </div>
           )}
 
@@ -491,30 +511,50 @@ export default function ReportesClient({
               <div className="px-5 py-3 border-b border-white/[0.06]">
                 <span className="text-yellow-400 text-sm font-medium">⚠️ Por vencer — legajos ({vencimientosFiltrados.length})</span>
               </div>
-              <div className="divide-y divide-white/[0.04]">
-                {vencimientosFiltrados.map((d: any) => {
-                  const dias = diasHasta(d.fecha_venc)
-                  return (
-                    <div key={d.id} className="px-5 py-3 flex items-center justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <Link href={`/dashboard/legajos/${d.proveedores?.id}`} className="text-white text-sm hover:text-blue-300 transition-colors font-medium">
-                          {d.proveedores?.razon_social}
+              {(() => {
+                const grupos = new Map<string, { nombre: string; id: string; docs: any[] }>()
+                for (const d of vencimientosFiltrados) {
+                  const key = d.proveedores?.id ?? 'sin-prov'
+                  if (!grupos.has(key)) grupos.set(key, { nombre: d.proveedores?.razon_social ?? '—', id: d.proveedores?.id, docs: [] })
+                  grupos.get(key)!.docs.push(d)
+                }
+                return Array.from(grupos.entries()).map(([key, g], gi) => (
+                  <details key={key} className={`group ${gi > 0 ? 'border-t border-white/[0.04]' : ''}`} open>
+                    <summary className="px-5 py-2.5 flex items-center justify-between cursor-pointer list-none hover:bg-white/[0.02] transition-colors">
+                      <div className="flex items-center gap-2">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                          className="text-zinc-600 group-open:rotate-90 transition-transform shrink-0">
+                          <polyline points="9 18 15 12 9 6"/>
+                        </svg>
+                        <Link href={`/dashboard/legajos/${g.id}`} onClick={e => e.stopPropagation()}
+                          className="text-white text-sm font-medium hover:text-blue-300 transition-colors">
+                          {g.nombre}
                         </Link>
-                        <p className="text-zinc-500 text-xs">{d.documentos_requeridos?.nombre}</p>
                       </div>
-                      <div className="flex items-center gap-4 shrink-0">
-                        <BtnRecordatorio proveedorId={d.proveedores?.id} />
-                        <div className="text-right">
-                          <p className="text-zinc-300 text-xs">{formatFechaVenc(d.fecha_venc)}</p>
-                          <p className={`text-xs font-medium ${dias === 0 ? 'text-red-400' : dias <= 7 ? 'text-red-400' : dias <= 15 ? 'text-orange-400' : 'text-yellow-400'}`}>
-                            {dias === 0 ? 'Vence hoy' : `en ${dias} día${dias !== 1 ? 's' : ''}`}
-                          </p>
-                        </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <BtnRecordatorio proveedorId={g.id} />
+                        <span className="text-zinc-600 text-xs">{g.docs.length} doc{g.docs.length !== 1 ? 's' : ''}</span>
                       </div>
+                    </summary>
+                    <div className="divide-y divide-white/[0.03]">
+                      {g.docs.map((d: any) => {
+                        const dias = diasHasta(d.fecha_venc)
+                        return (
+                          <div key={d.id} className="px-5 pl-10 py-2.5 flex items-center justify-between gap-4">
+                            <p className="text-zinc-400 text-xs flex-1">{d.documentos_requeridos?.nombre}</p>
+                            <div className="text-right shrink-0">
+                              <p className="text-zinc-400 text-xs">{formatFechaVenc(d.fecha_venc)}</p>
+                              <p className={`text-xs font-medium ${dias === 0 ? 'text-red-400' : dias <= 7 ? 'text-red-400' : dias <= 15 ? 'text-orange-400' : 'text-yellow-400'}`}>
+                                {dias === 0 ? 'Vence hoy' : `en ${dias} día${dias !== 1 ? 's' : ''}`}
+                              </p>
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
-                  )
-                })}
-              </div>
+                  </details>
+                ))
+              })()}
             </div>
           )}
 
@@ -523,31 +563,54 @@ export default function ReportesClient({
               <div className="px-5 py-3 border-b border-red-500/10">
                 <span className="text-red-400 text-sm font-medium">🔴 Vencidos — equipos ({docsEquipoVencidos.length})</span>
               </div>
-              <div className="divide-y divide-white/[0.04]">
-                {docsEquipoVencidos.map((d: any) => {
-                  const equipo = d.equipos_contratista
-                  const dias = Math.abs(diasHasta(d.fecha_venc))
-                  return (
-                    <div key={d.id} className="px-5 py-3 flex items-center justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-zinc-400 text-xs">{equipo?.tipos_equipo?.icono}</span>
-                          <span className="text-white text-sm font-medium font-mono">{equipo?.dominio}</span>
-                          <Link href={`/dashboard/legajos/${equipo?.proveedores?.id}`} className="text-zinc-500 text-xs hover:text-blue-300 transition-colors">{equipo?.proveedores?.razon_social}</Link>
-                        </div>
-                        <p className="text-zinc-500 text-xs mt-0.5">{d.documentos_requeridos_equipo?.nombre}</p>
+              {(() => {
+                const grupos = new Map<string, { nombre: string; id: string; docs: any[] }>()
+                for (const d of docsEquipoVencidos) {
+                  const prov = d.equipos_contratista?.proveedores
+                  const key = prov?.id ?? 'sin-prov'
+                  if (!grupos.has(key)) grupos.set(key, { nombre: prov?.razon_social ?? '—', id: prov?.id, docs: [] })
+                  grupos.get(key)!.docs.push(d)
+                }
+                return Array.from(grupos.entries()).map(([key, g], gi) => (
+                  <details key={key} className={`group ${gi > 0 ? 'border-t border-white/[0.04]' : ''}`} open>
+                    <summary className="px-5 py-2.5 flex items-center justify-between cursor-pointer list-none hover:bg-white/[0.02] transition-colors">
+                      <div className="flex items-center gap-2">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                          className="text-zinc-600 group-open:rotate-90 transition-transform shrink-0">
+                          <polyline points="9 18 15 12 9 6"/>
+                        </svg>
+                        <Link href={`/dashboard/legajos/${g.id}`} onClick={e => e.stopPropagation()}
+                          className="text-white text-sm font-medium hover:text-blue-300 transition-colors">
+                          {g.nombre}
+                        </Link>
                       </div>
-                      <div className="flex items-center gap-4 shrink-0">
-                        <BtnRecordatorio proveedorId={equipo?.proveedores?.id} />
-                        <div className="text-right">
-                          <p className="text-red-400 text-xs font-medium">Venció el {formatFechaVenc(d.fecha_venc)}</p>
-                          <p className="text-red-600 text-xs">hace {dias} día{dias !== 1 ? 's' : ''}</p>
-                        </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <BtnRecordatorio proveedorId={g.id} />
+                        <span className="text-zinc-600 text-xs">{g.docs.length} doc{g.docs.length !== 1 ? 's' : ''}</span>
                       </div>
+                    </summary>
+                    <div className="divide-y divide-white/[0.03]">
+                      {g.docs.map((d: any) => {
+                        const equipo = d.equipos_contratista
+                        const dias = Math.abs(diasHasta(d.fecha_venc))
+                        return (
+                          <div key={d.id} className="px-5 pl-10 py-2.5 flex items-center justify-between gap-4">
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <span className="text-zinc-500 text-xs">{equipo?.tipos_equipo?.icono}</span>
+                              <span className="text-zinc-300 text-xs font-mono">{equipo?.dominio}</span>
+                              <span className="text-zinc-500 text-xs truncate">{d.documentos_requeridos_equipo?.nombre}</span>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="text-red-400 text-xs font-medium">Venció el {formatFechaVenc(d.fecha_venc)}</p>
+                              <p className="text-red-600 text-xs">hace {dias} día{dias !== 1 ? 's' : ''}</p>
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
-                  )
-                })}
-              </div>
+                  </details>
+                ))
+              })()}
             </div>
           )}
 
@@ -556,33 +619,56 @@ export default function ReportesClient({
               <div className="px-5 py-3 border-b border-white/[0.06]">
                 <span className="text-yellow-400 text-sm font-medium">⚠️ Por vencer — equipos ({docsEquipoPorVencer.length})</span>
               </div>
-              <div className="divide-y divide-white/[0.04]">
-                {docsEquipoPorVencer.map((d: any) => {
-                  const equipo = d.equipos_contratista
-                  const dias = diasHasta(d.fecha_venc)
-                  return (
-                    <div key={d.id} className="px-5 py-3 flex items-center justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-zinc-400 text-xs">{equipo?.tipos_equipo?.icono}</span>
-                          <span className="text-white text-sm font-medium font-mono">{equipo?.dominio}</span>
-                          <Link href={`/dashboard/legajos/${equipo?.proveedores?.id}`} className="text-zinc-500 text-xs hover:text-blue-300 transition-colors">{equipo?.proveedores?.razon_social}</Link>
-                        </div>
-                        <p className="text-zinc-500 text-xs mt-0.5">{d.documentos_requeridos_equipo?.nombre}</p>
+              {(() => {
+                const grupos = new Map<string, { nombre: string; id: string; docs: any[] }>()
+                for (const d of docsEquipoPorVencer) {
+                  const prov = d.equipos_contratista?.proveedores
+                  const key = prov?.id ?? 'sin-prov'
+                  if (!grupos.has(key)) grupos.set(key, { nombre: prov?.razon_social ?? '—', id: prov?.id, docs: [] })
+                  grupos.get(key)!.docs.push(d)
+                }
+                return Array.from(grupos.entries()).map(([key, g], gi) => (
+                  <details key={key} className={`group ${gi > 0 ? 'border-t border-white/[0.04]' : ''}`} open>
+                    <summary className="px-5 py-2.5 flex items-center justify-between cursor-pointer list-none hover:bg-white/[0.02] transition-colors">
+                      <div className="flex items-center gap-2">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                          className="text-zinc-600 group-open:rotate-90 transition-transform shrink-0">
+                          <polyline points="9 18 15 12 9 6"/>
+                        </svg>
+                        <Link href={`/dashboard/legajos/${g.id}`} onClick={e => e.stopPropagation()}
+                          className="text-white text-sm font-medium hover:text-blue-300 transition-colors">
+                          {g.nombre}
+                        </Link>
                       </div>
-                      <div className="flex items-center gap-4 shrink-0">
-                        <BtnRecordatorio proveedorId={equipo?.proveedores?.id} />
-                        <div className="text-right">
-                          <p className="text-zinc-300 text-xs">{formatFechaVenc(d.fecha_venc)}</p>
-                          <p className={`text-xs font-medium ${dias === 0 ? 'text-red-400' : dias <= 7 ? 'text-red-400' : dias <= 15 ? 'text-orange-400' : 'text-yellow-400'}`}>
-                            {dias === 0 ? 'Vence hoy' : `en ${dias} día${dias !== 1 ? 's' : ''}`}
-                          </p>
-                        </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <BtnRecordatorio proveedorId={g.id} />
+                        <span className="text-zinc-600 text-xs">{g.docs.length} doc{g.docs.length !== 1 ? 's' : ''}</span>
                       </div>
+                    </summary>
+                    <div className="divide-y divide-white/[0.03]">
+                      {g.docs.map((d: any) => {
+                        const equipo = d.equipos_contratista
+                        const dias = diasHasta(d.fecha_venc)
+                        return (
+                          <div key={d.id} className="px-5 pl-10 py-2.5 flex items-center justify-between gap-4">
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <span className="text-zinc-500 text-xs">{equipo?.tipos_equipo?.icono}</span>
+                              <span className="text-zinc-300 text-xs font-mono">{equipo?.dominio}</span>
+                              <span className="text-zinc-500 text-xs truncate">{d.documentos_requeridos_equipo?.nombre}</span>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="text-zinc-400 text-xs">{formatFechaVenc(d.fecha_venc)}</p>
+                              <p className={`text-xs font-medium ${dias === 0 ? 'text-red-400' : dias <= 7 ? 'text-red-400' : dias <= 15 ? 'text-orange-400' : 'text-yellow-400'}`}>
+                                {dias === 0 ? 'Vence hoy' : `en ${dias} día${dias !== 1 ? 's' : ''}`}
+                              </p>
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
-                  )
-                })}
-              </div>
+                  </details>
+                ))
+              })()}
             </div>
           )}
 
@@ -707,15 +793,22 @@ export default function ReportesClient({
                   porProveedor.get(key)!.equipos.push(e)
                 }
                 return Array.from(porProveedor.entries()).map(([provId, grupo], gi) => (
-                  <div key={provId} className={gi > 0 ? 'border-t border-white/[0.06]' : ''}>
-                    {/* Header proveedor */}
-                    <div className="px-5 py-2.5 bg-white/[0.02] flex items-center justify-between">
-                      <Link href={`/dashboard/legajos/${grupo.provId}`}
-                        className="text-zinc-300 text-xs font-medium hover:text-blue-300 transition-colors">
-                        {grupo.nombre}
-                      </Link>
+                  <details key={provId} className={`group ${gi > 0 ? 'border-t border-white/[0.06]' : ''}`} open>
+                    {/* Header proveedor colapsable */}
+                    <summary className="px-5 py-2.5 bg-white/[0.02] flex items-center justify-between cursor-pointer list-none hover:bg-white/[0.03] transition-colors">
+                      <div className="flex items-center gap-2">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                          className="text-zinc-600 group-open:rotate-90 transition-transform shrink-0">
+                          <polyline points="9 18 15 12 9 6"/>
+                        </svg>
+                        <Link href={`/dashboard/legajos/${grupo.provId}`}
+                          onClick={e => e.stopPropagation()}
+                          className="text-zinc-300 text-xs font-medium hover:text-blue-300 transition-colors">
+                          {grupo.nombre}
+                        </Link>
+                      </div>
                       <span className="text-zinc-600 text-xs">{grupo.equipos.length} equipo{grupo.equipos.length !== 1 ? 's' : ''}</span>
-                    </div>
+                    </summary>
                     {/* Equipos del proveedor agrupados por estado */}
                     {(() => {
                       const porEstado = new Map<string, any[]>()
@@ -768,7 +861,7 @@ export default function ReportesClient({
                         </div>
                       ))
                     })()}
-                  </div>
+                  </details>
                 ))
               })()}
               </>
