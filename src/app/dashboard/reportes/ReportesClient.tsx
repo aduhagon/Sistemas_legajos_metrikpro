@@ -315,7 +315,7 @@ export default function ReportesClient({
                         style={{ width: `${stats.total > 0 ? ((count as number) / stats.total) * 100 : 0}%` }}/>
                     </div>
                     <span className="text-zinc-500 text-xs w-6 text-right">{count as number}</span>
-                  </details>
+                  </div>
                 ))}
             </div>
           </div>
