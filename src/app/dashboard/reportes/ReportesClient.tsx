@@ -6,6 +6,8 @@ import AuditoriasReportes from './AuditoriasReportes'
 import BtnRecordatorio from './BtnRecordatorio'
 import ActividadTab from './ActividadTab'
 
+const TZ = 'America/Argentina/Buenos_Aires'
+
 type Props = {
   stats: { total: number; pendientes: number; enRevision: number; aprobados: number; rechazados: number; suspendidos: number }
   vencimientos: any[]
@@ -39,14 +41,21 @@ export default function ReportesClient({
   const hoy = new Date()
   const hoyStr = hoy.toISOString().split('T')[0]
 
-  // FIX UX-H-02: comparar strings de fecha (YYYY-MM-DD) en lugar de timestamps
-  // para evitar que la zona horaria UTC vs local convierta "hoy" en negativo o 0
   function diasHasta(fechaStr: string): number {
-    // Comparación puramente de strings de fecha — sin conversión de zona horaria
     const [ay, am, ad] = hoyStr.split('-').map(Number)
     const [by, bm, bd] = fechaStr.split('-').map(Number)
     const msLocal = Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)
     return Math.ceil(msLocal / (1000 * 60 * 60 * 24))
+  }
+
+  // Formatear fecha y hora en zona horaria de Argentina
+  function formatFechaAR(dateStr: string) {
+    const d = new Date(dateStr)
+    return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', timeZone: TZ })
+  }
+  function formatHoraAR(dateStr: string) {
+    const d = new Date(dateStr)
+    return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: TZ })
   }
 
   const rubroConteo = porRubro.reduce((acc: Record<string, number>, p: any) => {
@@ -56,32 +65,33 @@ export default function ReportesClient({
   }, {})
 
   const accesosFiltrados = accesos.filter((a: any) => {
-    if (filtroEstab !== 'TODOS' && a.establecimiento_id !== filtroEstab) return false
+    if (filtroEstab !== 'TODOS' && a.habilitaciones?.establecimiento?.nombre !== filtroEstab) return false
     if (filtroTipo !== 'TODOS' && a.tipo !== filtroTipo) return false
     if (filtroFecha) {
-      const fechaAcceso = new Date(a.created_at).toISOString().split('T')[0]
-      if (fechaAcceso !== filtroFecha) return false
+      const fechaAcceso = new Date(a.created_at).toLocaleDateString('es-AR', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' })
+      const [d, m, y] = fechaAcceso.split('/')
+      const fechaStr = `${y}-${m}-${d}`
+      if (fechaStr !== filtroFecha) return false
     }
     return true
   })
 
-  const accesosHoy = accesos.filter((a: any) =>
-    new Date(a.created_at).toISOString().split('T')[0] === hoyStr
-  )
+  const accesosHoy = accesos.filter((a: any) => {
+    const fechaAR = new Date(a.created_at).toLocaleDateString('es-AR', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' })
+    const [d, m, y] = fechaAR.split('/')
+    return `${y}-${m}-${d}` === hoyStr
+  })
   const ingresosHoy  = accesosHoy.filter((a: any) => a.tipo === 'INGRESO').length
   const egresosHoy   = accesosHoy.filter((a: any) => a.tipo === 'EGRESO').length
   const anomaliasHoy = accesosHoy.filter((a: any) => a.dentro_perimetro === false).length
 
-  // Stats equipos
   const equiposAprobados  = todosEquipos.filter(e => e.estado === 'APROBADO').length
   const equiposPendientes = todosEquipos.filter(e => e.estado === 'PENDIENTE').length
-  const equiposEnRevision = todosEquipos.filter(e => e.estado === 'EN_REVISION').length
 
   const equiposFiltrados = filtroEstadoEquipo === 'TODOS'
     ? todosEquipos
     : todosEquipos.filter(e => e.estado === filtroEstadoEquipo)
 
-  // FIX UX-H-02: filtrar por días usando la función corregida
   const vencimientosFiltrados = vencimientos.filter((d: any) => {
     const dias = diasHasta(d.fecha_venc)
     return dias >= 0 && dias <= filtroDias
@@ -111,7 +121,7 @@ export default function ReportesClient({
         p.razon_social, p.cuit, p.tipo_proveedor,
         p.rubros?.nombre ?? '', p.estado, p.email,
         p.telefono ?? '',
-        new Date(p.created_at).toLocaleDateString('es-AR'),
+        new Date(p.created_at).toLocaleDateString('es-AR', { timeZone: TZ }),
         p.notif_vencimientos ? 'Sí' : 'No',
       ]),
       `proveedores_${hoyStr}.csv`,
@@ -134,7 +144,7 @@ export default function ReportesClient({
           e.estado,
           `${docsOk}/${docs.length}`,
           docsVenc > 0 ? `${docsVenc} vencido(s)` : '',
-          new Date(e.created_at).toLocaleDateString('es-AR'),
+          new Date(e.created_at).toLocaleDateString('es-AR', { timeZone: TZ }),
         ]
       }),
       `equipos_${hoyStr}.csv`,
@@ -164,26 +174,25 @@ export default function ReportesClient({
 
   function exportarAccesosCSV() {
     exportarCSV(
-      accesosFiltrados.map((a: any) => {
-        const fecha = new Date(a.created_at)
-        return [
-          fecha.toLocaleDateString('es-AR'),
-          fecha.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }),
-          a.tipo,
-          a.habilitaciones?.proveedores?.razon_social ?? '',
-          a.habilitaciones?.proveedores?.cuit ?? '',
-          a.habilitaciones?.proveedores?.rubros?.nombre ?? '',
-          a.lat && a.lng ? `${a.lat},${a.lng}` : 'Sin GPS',
-          a.dentro_perimetro === null ? 'Sin perímetro' : a.dentro_perimetro ? 'Sí' : 'No',
-        ]
-      }),
+      accesosFiltrados.map((a: any) => [
+        formatFechaAR(a.created_at),
+        formatHoraAR(a.created_at),
+        a.tipo,
+        a.habilitaciones?.proveedores?.razon_social ?? '',
+        a.habilitaciones?.proveedores?.cuit ?? '',
+        a.habilitaciones?.proveedores?.rubros?.nombre ?? '',
+        a.habilitaciones?.establecimiento?.nombre ?? '',
+        a.lat && a.lng ? `${a.lat},${a.lng}` : 'Sin GPS',
+        a.dentro_perimetro === null ? 'Sin perímetro' : a.dentro_perimetro ? 'Sí' : 'No',
+        a.es_excepcion ? 'Sí' : 'No',
+        a.excepcion_autorizado_por ?? '',
+        a.excepcion_justificacion ?? '',
+      ]),
       `accesos_${hoyStr}.csv`,
-      ['Fecha', 'Hora', 'Tipo', 'Proveedor', 'CUIT', 'Rubro', 'GPS', 'En perímetro']
+      ['Fecha', 'Hora', 'Tipo', 'Proveedor', 'CUIT', 'Rubro', 'Establecimiento', 'GPS', 'En perímetro', 'Excepción', 'Autorizado por', 'Justificación']
     )
   }
 
-  // FIX UX-H-02: formatear fecha de vencimiento sin corrimiento de zona horaria
-  // Usar T12:00:00 para que toLocaleDateString no devuelva el día anterior
   function formatFechaVenc(fechaStr: string): string {
     return new Date(fechaStr + 'T12:00:00').toLocaleDateString('es-AR')
   }
@@ -242,7 +251,6 @@ export default function ReportesClient({
             ))}
           </div>
 
-          {/* Stats equipos */}
           <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-5">
             <h3 className="text-sm font-medium mb-4">Equipos y bienes</h3>
             <div className="grid grid-cols-4 gap-4">
@@ -272,7 +280,6 @@ export default function ReportesClient({
             )}
           </div>
 
-          {/* Accesos hoy */}
           <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-5">
             <h3 className="text-sm font-medium mb-4">Accesos hoy</h3>
             <div className="grid grid-cols-3 gap-4">
@@ -291,7 +298,6 @@ export default function ReportesClient({
             </div>
           </div>
 
-          {/* Distribución por rubro */}
           <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-5">
             <h3 className="text-sm font-medium mb-4">Proveedores por rubro</h3>
             <div className="space-y-2">
@@ -310,7 +316,6 @@ export default function ReportesClient({
             </div>
           </div>
 
-          {/* Alertas */}
           {(vencimientos.length > 0 || vencidos.length > 0) && (
             <div className="grid grid-cols-2 gap-4">
               {vencidos.length > 0 && (
@@ -337,7 +342,7 @@ export default function ReportesClient({
             <select value={filtroEstab} onChange={e => setFiltroEstab(e.target.value)}
               className="bg-[#1a1d27] border border-white/[0.1] rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none">
               <option value="TODOS">Todos los establecimientos</option>
-              {establecimientos.map((e: any) => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+              {establecimientos.map((e: any) => <option key={e.id} value={e.nombre}>{e.nombre}</option>)}
             </select>
             <select value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}
               className="bg-[#1a1d27] border border-white/[0.1] rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none">
@@ -376,8 +381,8 @@ export default function ReportesClient({
             ) : (
               <div className="divide-y divide-white/[0.04]">
                 {accesosFiltrados.map((acc: any) => {
-                  const prov = acc.habilitaciones?.proveedores
-                  const fecha = new Date(acc.created_at)
+                  const prov  = acc.habilitaciones?.proveedores
+                  const estab = acc.habilitaciones?.establecimiento
                   return (
                     <div key={acc.id} className="px-5 py-3 flex items-center gap-4">
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${acc.tipo === 'INGRESO' ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
@@ -394,7 +399,18 @@ export default function ReportesClient({
                             {prov.razon_social}
                           </Link>
                         ) : <span className="text-zinc-500 text-sm">Proveedor desconocido</span>}
-                        {prov?.cuit && <p className="text-zinc-600 text-xs">CUIT {prov.cuit}</p>}
+                        <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                          {prov?.cuit && <p className="text-zinc-600 text-xs">CUIT {prov.cuit}</p>}
+                          {estab?.nombre && (
+                            <>
+                              <span className="text-zinc-700 text-xs">·</span>
+                              <p className="text-zinc-500 text-xs">📍 {estab.nombre}</p>
+                            </>
+                          )}
+                          {acc.es_excepcion && (
+                            <span className="text-orange-400 text-xs bg-orange-500/10 border border-orange-500/20 px-1.5 py-0.5 rounded-full">⚠ Excepción</span>
+                          )}
+                        </div>
                       </div>
                       {acc.dentro_perimetro === false && (
                         <span className="text-yellow-400 text-xs bg-yellow-500/10 border border-yellow-500/20 px-2 py-0.5 rounded-full shrink-0">⚠ GPS</span>
@@ -408,8 +424,8 @@ export default function ReportesClient({
                         </a>
                       )}
                       <div className="text-right shrink-0">
-                        <p className="text-zinc-400 text-xs">{fecha.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })}</p>
-                        <p className="text-zinc-600 text-xs">{fecha.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}</p>
+                        <p className="text-zinc-400 text-xs">{formatFechaAR(acc.created_at)}</p>
+                        <p className="text-zinc-600 text-xs">{formatHoraAR(acc.created_at)}</p>
                       </div>
                     </div>
                   )
@@ -498,7 +514,6 @@ export default function ReportesClient({
             </div>
           )}
 
-          {/* Vencimientos equipos */}
           {docsEquipoVencidos.length > 0 && (
             <div className="bg-red-500/5 border border-red-500/20 rounded-2xl overflow-hidden">
               <div className="px-5 py-3 border-b border-red-500/10">
@@ -621,7 +636,7 @@ export default function ReportesClient({
                           {p.estado === 'EN_REVISION' ? 'En revisión' : p.estado.charAt(0) + p.estado.slice(1).toLowerCase()}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-zinc-500 text-xs">{new Date(p.created_at).toLocaleDateString('es-AR')}</td>
+                      <td className="px-4 py-3 text-zinc-500 text-xs">{new Date(p.created_at).toLocaleDateString('es-AR', { timeZone: TZ })}</td>
                       <td className="px-4 py-3">
                         <Link href={`/dashboard/legajos/${p.id}`} className="text-blue-400 hover:text-blue-300 text-xs transition-colors">Ver →</Link>
                       </td>
@@ -652,7 +667,6 @@ export default function ReportesClient({
             </div>
             <button onClick={exportarEquiposCSV} className={btnExport}>{iconDownload} Exportar CSV</button>
           </div>
-
           <div className="grid grid-cols-4 gap-3">
             {[
               { label: 'Total', value: todosEquipos.length, color: 'white' },
@@ -669,7 +683,6 @@ export default function ReportesClient({
               </div>
             ))}
           </div>
-
           <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
             <div className="px-5 py-3 border-b border-white/[0.06] flex items-center justify-between">
               <span className="text-sm font-medium">Lista de equipos</span>
@@ -721,7 +734,7 @@ export default function ReportesClient({
         <AuditoriasReportes visitas={visitas} rol={rol} />
       )}
 
-      {/* ── ACTIVIDAD ── UX-P-04: feed con lenguaje de negocio */}
+      {/* ── ACTIVIDAD ── */}
       {tab === 'actividad' && (
         <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
           <div className="px-5 py-4 border-b border-white/[0.06]">

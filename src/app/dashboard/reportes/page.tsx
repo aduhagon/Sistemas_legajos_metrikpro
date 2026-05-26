@@ -97,7 +97,10 @@ export default async function ReportesPage() {
     supabaseAdmin.from('registros_acceso')
       .select(`id, tipo, created_at, lat, lng, dentro_perimetro,
         es_excepcion, excepcion_justificacion, excepcion_autorizado_por,
-        habilitaciones:habilitacion_id(proveedores:proveedor_id(id, razon_social, cuit, rubros(nombre)))`)
+        habilitaciones:habilitacion_id(
+          proveedores:proveedor_id(id, razon_social, cuit, rubros(nombre)),
+          establecimiento:establecimiento_id(nombre)
+        )`)
       .order('created_at', { ascending: false })
       .limit(500),
     // ── Equipos — admin client (bypasa RLS que bloqueaba estos datos) ─────────
