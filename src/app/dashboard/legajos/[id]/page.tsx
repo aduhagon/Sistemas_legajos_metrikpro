@@ -42,7 +42,7 @@ export default async function LegajoDetallePage({
       documentos_legajo(
         id, estado, fecha_venc, observaciones, archivo_url,
         fecha_presentacion, fecha_revision, updated_at,
-        documentos_requeridos(codigo, nombre, tipo_vigencia, obligatorio)
+        documentos_requeridos(codigo, nombre, tipo_vigencia, obligatorio, rubro_id, rubros(nombre))
       )
     `)
     .eq('id', id)
@@ -299,88 +299,143 @@ export default async function LegajoDetallePage({
       />
 
       {/* ── TAB: DOCUMENTOS ── */}
-      {tabActivo === 'documentos' && (
-        <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
-          <div className="px-6 py-4 border-b border-white/[0.06]">
-            <h2 className="text-sm font-medium">Documentos del legajo</h2>
-            <p className="text-zinc-500 text-xs mt-0.5">Documentación de la empresa contratista</p>
-          </div>
-          <div className="divide-y divide-white/[0.04]">
-            {docs.map((doc: any) => {
-              const dr = doc.documentos_requeridos
-              const colorClass = estadoDocColor[doc.estado] ?? estadoDocColor.PENDIENTE
-              return (
-                <div key={doc.id} className="px-6 py-4">
-                  <div className="flex items-start justify-between gap-4 mb-2">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                        <span className="text-zinc-500 text-xs font-mono">{dr?.codigo}</span>
-                        <span className="text-sm text-white">{dr?.nombre}</span>
-                        {dr?.obligatorio && <span className="text-red-400 text-xs">*</span>}
-                      </div>
-                      <span className="text-zinc-600 text-xs">{dr?.tipo_vigencia}</span>
-                    </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                      {doc.archivo_url && (
-                        <a href={doc.archivo_url} target="_blank" rel="noopener noreferrer"
-                          className="text-blue-400 hover:text-blue-300 text-xs transition-colors">
-                          Ver archivo →
-                        </a>
-                      )}
-                      <span className={`text-xs px-2.5 py-1 rounded-full border ${colorClass}`}>
-                        {doc.estado.toLowerCase()}
-                      </span>
-                    </div>
+      {tabActivo === 'documentos' && (() => {
+        // Agrupar docs por rubro: null → "Generales", uuid → nombre del rubro
+        const grupos = new Map<string, { label: string; docs: any[] }>()
+        for (const doc of docs) {
+          const dr       = doc.documentos_requeridos
+          const rubroId  = dr?.rubro_id ?? '__general__'
+          const rubroNombre = dr?.rubros?.nombre ?? null
+          if (!grupos.has(rubroId)) {
+            grupos.set(rubroId, {
+              label: rubroNombre ?? 'Documentos generales',
+              docs:  [],
+            })
+          }
+          grupos.get(rubroId)!.docs.push(doc)
+        }
+        // Ordenar: generales primero, luego rubros alfabéticamente
+        const gruposOrdenados = Array.from(grupos.entries()).sort(([a], [b]) => {
+          if (a === '__general__') return -1
+          if (b === '__general__') return  1
+          return grupos.get(a)!.label.localeCompare(grupos.get(b)!.label, 'es')
+        })
+        const hayVariosGrupos = gruposOrdenados.length > 1
+
+        function renderDoc(doc: any) {
+          const dr         = doc.documentos_requeridos
+          const colorClass = estadoDocColor[doc.estado] ?? estadoDocColor.PENDIENTE
+          return (
+            <div key={doc.id} className="px-6 py-4">
+              <div className="flex items-start justify-between gap-4 mb-2">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                    <span className="text-zinc-500 text-xs font-mono">{dr?.codigo}</span>
+                    <span className="text-sm text-white">{dr?.nombre}</span>
+                    {dr?.obligatorio && <span className="text-red-400 text-xs">*</span>}
                   </div>
-                  <div className="flex items-center gap-4 mb-2 flex-wrap">
-                    {doc.fecha_presentacion && (
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-1.5 h-1.5 rounded-full bg-blue-400"/>
-                        <span className="text-zinc-600 text-xs">
-                          Presentado: <span className="text-zinc-400">
-                            {new Date(doc.fecha_presentacion).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </span>
-                      </div>
-                    )}
-                    {doc.fecha_revision && (
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-1.5 h-1.5 rounded-full bg-purple-400"/>
-                        <span className="text-zinc-600 text-xs">
-                          Revisado: <span className="text-zinc-400">
-                            {new Date(doc.fecha_revision).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </span>
-                      </div>
-                    )}
-                    {doc.fecha_venc && (
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-1.5 h-1.5 rounded-full bg-zinc-500"/>
-                        <span className="text-zinc-600 text-xs">
-                          Vence: <span className="text-zinc-400">
-                            {new Date(doc.fecha_venc + 'T12:00:00').toLocaleDateString('es-AR')}
-                          </span>
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                  {doc.observaciones && (
-                    <p className="text-orange-400 text-xs italic mb-2">"{doc.observaciones}"</p>
-                  )}
-                  <AccionesDocumento
-                    docId={doc.id}
-                    estado={doc.estado}
-                    fechaVencActual={doc.fecha_venc}
-                    tipoVigencia={dr?.tipo_vigencia ?? 'ANUAL'}
-                    proveedorId={proveedor.id}
-                    docNombre={dr?.nombre ?? ''}
-                  />
+                  <span className="text-zinc-600 text-xs">{dr?.tipo_vigencia}</span>
                 </div>
-              )
-            })}
+                <div className="flex items-center gap-3 shrink-0">
+                  {doc.archivo_url && (
+                    <a href={doc.archivo_url} target="_blank" rel="noopener noreferrer"
+                      className="text-blue-400 hover:text-blue-300 text-xs transition-colors">
+                      Ver archivo →
+                    </a>
+                  )}
+                  <span className={`text-xs px-2.5 py-1 rounded-full border ${colorClass}`}>
+                    {doc.estado.toLowerCase()}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-4 mb-2 flex-wrap">
+                {doc.fecha_presentacion && (
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-blue-400"/>
+                    <span className="text-zinc-600 text-xs">
+                      Presentado: <span className="text-zinc-400">
+                        {new Date(doc.fecha_presentacion).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </span>
+                  </div>
+                )}
+                {doc.fecha_revision && (
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-purple-400"/>
+                    <span className="text-zinc-600 text-xs">
+                      Revisado: <span className="text-zinc-400">
+                        {new Date(doc.fecha_revision).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </span>
+                  </div>
+                )}
+                {doc.fecha_venc && (
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-zinc-500"/>
+                    <span className="text-zinc-600 text-xs">
+                      Vence: <span className="text-zinc-400">
+                        {new Date(doc.fecha_venc + 'T12:00:00').toLocaleDateString('es-AR')}
+                      </span>
+                    </span>
+                  </div>
+                )}
+              </div>
+              {doc.observaciones && (
+                <p className="text-orange-400 text-xs italic mb-2">"{doc.observaciones}"</p>
+              )}
+              <AccionesDocumento
+                docId={doc.id}
+                estado={doc.estado}
+                fechaVencActual={doc.fecha_venc}
+                tipoVigencia={dr?.tipo_vigencia ?? 'ANUAL'}
+                proveedorId={proveedor.id}
+                docNombre={dr?.nombre ?? ''}
+              />
+            </div>
+          )
+        }
+
+        return (
+          <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-white/[0.06]">
+              <h2 className="text-sm font-medium">Documentos del legajo</h2>
+              <p className="text-zinc-500 text-xs mt-0.5">Documentación de la empresa contratista</p>
+            </div>
+
+            {hayVariosGrupos ? (
+              // ── Vista agrupada por rubro ──
+              <div>
+                {gruposOrdenados.map(([rubroId, grupo], idx) => {
+                  const docsAprobadosGrupo = grupo.docs.filter((d: any) => d.estado === 'APROBADO').length
+                  const isGeneral = rubroId === '__general__'
+                  return (
+                    <div key={rubroId} className={idx > 0 ? 'border-t border-white/[0.06]' : ''}>
+                      {/* Header del grupo */}
+                      <div className="px-6 py-3 bg-white/[0.02] flex items-center gap-3">
+                        <span className={`text-xs font-medium ${isGeneral ? 'text-zinc-400' : 'text-blue-300'}`}>
+                          {isGeneral ? '📋' : '🏷'} {grupo.label}
+                        </span>
+                        <span className="text-zinc-600 text-xs">
+                          {docsAprobadosGrupo}/{grupo.docs.length} aprobados
+                        </span>
+                      </div>
+                      {/* Docs del grupo */}
+                      <div className="divide-y divide-white/[0.04]">
+                        {grupo.docs.map(renderDoc)}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              // ── Vista plana (un solo grupo) ──
+              <div className="divide-y divide-white/[0.04]">
+                {docs.map(renderDoc)}
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* ── TAB: EQUIPOS ── */}
       {tabActivo === 'equipos' && (
