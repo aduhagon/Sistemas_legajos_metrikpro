@@ -711,16 +711,15 @@ function SeccionPersonal({ proveedorId, operariosIniciales, miRol }: {
     setTimeout(() => setExito(''), 4000)
   }
 
-  async function darDeBaja(userId: string) {
+  async function darDeBaja(registroId: string) {
     setBajaLoading(true)
     const { error } = await supabase
       .from('proveedores_usuarios')
       .update({ activo: false })
-      .eq('proveedor_id', proveedorId)
-      .eq('user_id', userId)
+      .eq('id', registroId)
     setBajaLoading(false)
     if (!error) {
-      setOperarios(prev => prev.filter(o => o.id !== userId))
+      setOperarios(prev => prev.filter(o => o.id !== registroId))
     }
     setBajaId(null)
   }
