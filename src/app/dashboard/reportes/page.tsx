@@ -95,7 +95,8 @@ export default async function ReportesPage() {
       .eq('activo', true)
       .order('nombre'),
     supabaseAdmin.from('registros_acceso')
-      .select(`id, tipo, created_at, lat, lng, dentro_perimetro, establecimiento_id,
+      .select(`id, tipo, created_at, lat, lng, dentro_perimetro,
+        es_excepcion, excepcion_justificacion, excepcion_autorizado_por,
         habilitaciones:habilitacion_id(proveedores:proveedor_id(id, razon_social, cuit, rubros(nombre)))`)
       .order('created_at', { ascending: false })
       .limit(500),
