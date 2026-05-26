@@ -695,6 +695,7 @@ export default function ReportesClient({
             {equiposFiltrados.length === 0 ? (
               <div className="px-5 py-8 text-center"><p className="text-zinc-500 text-sm">No hay equipos con ese estado</p></div>
             ) : (
+              <>
               {/* Agrupar por proveedor */}
               {(() => {
                 const porProveedor = new Map<string, { nombre: string; provId: string; equipos: any[] }>()
@@ -770,6 +771,7 @@ export default function ReportesClient({
                   </div>
                 ))
               })()}
+              </>
             )}
           </div>
         </div>
