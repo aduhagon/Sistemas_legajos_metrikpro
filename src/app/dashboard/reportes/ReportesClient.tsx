@@ -39,7 +39,11 @@ export default function ReportesClient({
   const [filtroEstadoEquipo, setFiltroEstadoEquipo] = useState('TODOS')
 
   const hoy = new Date()
-  const hoyStr = hoy.toISOString().split('T')[0]
+  // hoyStr en zona horaria Argentina (no UTC) para evitar que "hoy" cambie a medianoche UTC-0
+  const _hoyPartes = hoy.toLocaleDateString('es-AR', {
+    timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit'
+  }).split('/')
+  const hoyStr = `${_hoyPartes[2]}-${_hoyPartes[1]}-${_hoyPartes[0]}`
 
   function diasHasta(fechaStr: string): number {
     const [ay, am, ad] = hoyStr.split('-').map(Number)
