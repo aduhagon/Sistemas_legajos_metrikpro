@@ -663,6 +663,216 @@ function SeccionEquipos({ proveedorId }: { proveedorId: string }) {
   )
 }
 
+// ── SeccionPersonal ──────────────────────────────────────────────────────────
+function SeccionPersonal({ proveedorId, operariosIniciales, miRol }: {
+  proveedorId: string
+  operariosIniciales: any[]
+  miRol: string
+}) {
+  const [operarios, setOperarios] = useState(operariosIniciales)
+  const [showModal, setShowModal] = useState(false)
+  const [form, setForm] = useState({ nombre: '', email: '', cuil: '' })
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [exito, setExito] = useState('')
+  const [bajaId, setBajaId] = useState<string | null>(null)
+  const [bajaLoading, setBajaLoading] = useState(false)
+
+  const inputCls = "w-full bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500/50 placeholder:text-zinc-600"
+
+  async function invitar() {
+    if (!form.nombre.trim() || !form.email.trim()) { setError('Nombre y email son requeridos'); return }
+    setLoading(true); setError('')
+    const { data, error: rpcErr } = await supabase.rpc('invitar_operario', {
+      p_proveedor_id: proveedorId,
+      p_email:        form.email.trim(),
+      p_nombre:       form.nombre.trim(),
+      p_cuil:         form.cuil.trim() || null,
+    })
+    if (rpcErr || data?.error) {
+      setError(data?.error ?? rpcErr?.message ?? 'Error al invitar')
+      setLoading(false); return
+    }
+    // Enviar email de recuperación
+    await supabase.auth.resetPasswordForEmail(form.email.trim(), {
+      redirectTo: `${window.location.origin}/auth/callback?type=recovery`,
+    })
+    setOperarios(prev => [...prev, {
+      id:     data.user_id,
+      nombre: form.nombre.trim(),
+      cuil:   form.cuil.trim() || null,
+      rol:    'operario',
+      activo: true,
+    }])
+    setExito(`Invitación enviada a ${form.email}`)
+    setForm({ nombre: '', email: '', cuil: '' })
+    setShowModal(false)
+    setLoading(false)
+    setTimeout(() => setExito(''), 4000)
+  }
+
+  async function darDeBaja(userId: string) {
+    setBajaLoading(true)
+    const { error } = await supabase
+      .from('proveedores_usuarios')
+      .update({ activo: false })
+      .eq('proveedor_id', proveedorId)
+      .eq('user_id', userId)
+    setBajaLoading(false)
+    if (!error) {
+      setOperarios(prev => prev.filter(o => o.id !== userId))
+    }
+    setBajaId(null)
+  }
+
+  return (
+    <div className="space-y-3">
+      {exito && (
+        <div className="bg-green-500/10 border border-green-500/20 rounded-xl px-4 py-3">
+          <p className="text-green-400 text-sm">✓ {exito}</p>
+        </div>
+      )}
+
+      <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
+        <div className="px-5 py-4 border-b border-white/[0.06] flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-medium">Personal con acceso al QR</h2>
+            <p className="text-zinc-500 text-xs mt-0.5">Cada operario recibe un email para definir su contraseña</p>
+          </div>
+          {miRol === 'titular' && (
+            <button onClick={() => { setShowModal(true); setError('') }}
+              className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg shrink-0">
+              + Agregar
+            </button>
+          )}
+        </div>
+        <div className="divide-y divide-white/[0.04]">
+          {operarios.map((p: any) => (
+            <div key={p.id} className="px-5 py-3 flex items-center gap-3">
+              <div className="w-8 h-8 bg-white/[0.06] rounded-full flex items-center justify-center text-sm font-medium">
+                {p.nombre?.charAt(0)?.toUpperCase() ?? '?'}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-white text-sm">{p.nombre}</p>
+                {p.cuil && <p className="text-zinc-500 text-xs">CUIL {p.cuil}</p>}
+              </div>
+              <span className={`text-xs px-2 py-0.5 rounded-full border ${
+                p.rol === 'titular'
+                  ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+                  : 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20'
+              }`}>
+                {p.rol === 'titular' ? 'Titular' : 'Operario'}
+              </span>
+              {/* Botón baja — solo para operarios, solo titular puede */}
+              {miRol === 'titular' && p.rol !== 'titular' && (
+                <button
+                  onClick={() => setBajaId(p.id)}
+                  className="text-zinc-700 hover:text-red-400 transition-colors p-1"
+                  title="Dar de baja"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                    <path d="M10 11v6M14 11v6"/>
+                  </svg>
+                </button>
+              )}
+            </div>
+          ))}
+          {operarios.filter((p: any) => p.rol !== 'titular').length === 0 && (
+            <div className="px-5 py-6 text-center">
+              <p className="text-zinc-600 text-sm">Sin operarios registrados todavía</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Modal agregar operario */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.7)' }}
+          onClick={e => { if (e.target === e.currentTarget) setShowModal(false) }}>
+          <div className="bg-[#1a1d27] border border-white/[0.1] rounded-2xl w-full max-w-sm shadow-2xl">
+            <div className="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between">
+              <h3 className="text-white font-medium text-sm">Agregar operario</h3>
+              <button onClick={() => setShowModal(false)} className="text-zinc-500 hover:text-zinc-300 p-1">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6 6 18M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <div>
+                <label className="block text-zinc-400 text-xs mb-1.5">Nombre completo *</label>
+                <input value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))}
+                  placeholder="Juan García" className={inputCls} autoFocus/>
+              </div>
+              <div>
+                <label className="block text-zinc-400 text-xs mb-1.5">Email *</label>
+                <input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+                  placeholder="juan@empresa.com" className={inputCls}/>
+              </div>
+              <div>
+                <label className="block text-zinc-400 text-xs mb-1.5">CUIL <span className="text-zinc-600">(opcional)</span></label>
+                <input value={form.cuil} onChange={e => setForm(f => ({ ...f, cuil: e.target.value }))}
+                  placeholder="20-12345678-9" className={inputCls}/>
+              </div>
+              <div className="bg-blue-500/5 border border-blue-500/15 rounded-lg px-3 py-2">
+                <p className="text-blue-400 text-xs">Se enviará un email para que defina su contraseña y pueda usar el carnet QR.</p>
+              </div>
+              {error && (
+                <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                  <p className="text-red-400 text-xs">{error}</p>
+                </div>
+              )}
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => setShowModal(false)}
+                  className="flex-1 bg-white/[0.05] hover:bg-white/[0.08] text-zinc-300 text-sm py-2.5 rounded-xl">
+                  Cancelar
+                </button>
+                <button onClick={invitar} disabled={loading || !form.nombre || !form.email}
+                  className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-medium text-sm py-2.5 rounded-xl flex items-center justify-center gap-2">
+                  {loading
+                    ? <><svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>Enviando…</>
+                    : 'Invitar y enviar email'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal confirmación de baja */}
+      {bajaId && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.7)' }}
+          onClick={e => { if (e.target === e.currentTarget) setBajaId(null) }}>
+          <div className="bg-[#1a1d27] border border-white/[0.1] rounded-2xl w-full max-w-sm shadow-2xl">
+            <div className="px-5 py-4">
+              <h3 className="text-white font-medium text-sm mb-2">Dar de baja operario</h3>
+              <p className="text-zinc-400 text-sm mb-4">
+                ¿Confirmás que querés dar de baja a <strong className="text-white">
+                  {operarios.find(o => o.id === bajaId)?.nombre}
+                </strong>? Ya no podrá acceder con su carnet QR.
+              </p>
+              <div className="flex gap-2">
+                <button onClick={() => setBajaId(null)}
+                  className="flex-1 bg-white/[0.05] hover:bg-white/[0.08] text-zinc-300 text-sm py-2.5 rounded-xl">
+                  Cancelar
+                </button>
+                <button onClick={() => darDeBaja(bajaId)} disabled={bajaLoading}
+                  className="flex-1 bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white font-medium text-sm py-2.5 rounded-xl">
+                  {bajaLoading ? 'Procesando…' : 'Dar de baja'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── PortalClient (componente principal) ──────────────────────────────────────
 export default function PortalClient({
   proveedor, docs, habilitacion, operarios, accesos,
@@ -910,36 +1120,11 @@ export default function PortalClient({
 
         {/* PERSONAL */}
         {seccion === 'personal' && (
-          <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
-            <div className="px-5 py-4 border-b border-white/[0.06] flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-medium">Personal con acceso al QR</h2>
-                <p className="text-zinc-500 text-xs mt-0.5">Cada operario recibe un email para definir su contraseña</p>
-              </div>
-              {miRol === 'titular' && (
-                <button className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg shrink-0">+ Agregar</button>
-              )}
-            </div>
-            <div className="divide-y divide-white/[0.04]">
-              {operarios.map((p: any) => (
-                <div key={p.id} className="px-5 py-3 flex items-center gap-3">
-                  <div className="w-8 h-8 bg-white/[0.06] rounded-full flex items-center justify-center text-sm font-medium">
-                    {p.nombre?.charAt(0)?.toUpperCase() ?? '?'}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-white text-sm">{p.nombre}</p>
-                    {p.cuil && <p className="text-zinc-500 text-xs">CUIL {p.cuil}</p>}
-                  </div>
-                  <span className={`text-xs px-2 py-0.5 rounded-full border ${p.rol === 'titular' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20'}`}>
-                    {p.rol === 'titular' ? 'Titular' : 'Operario'}
-                  </span>
-                </div>
-              ))}
-              {operarios.filter((p: any) => p.rol !== 'titular').length === 0 && (
-                <div className="px-5 py-6 text-center"><p className="text-zinc-600 text-sm">Sin operarios registrados todavía</p></div>
-              )}
-            </div>
-          </div>
+          <SeccionPersonal
+            proveedorId={proveedor.id}
+            operariosIniciales={operarios}
+            miRol={miRol}
+          />
         )}
 
         {/* ACCESOS */}
