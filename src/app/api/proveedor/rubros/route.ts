@@ -1,10 +1,11 @@
 // src/app/api/proveedor/rubros/route.ts
-// Actualiza los rubros de un proveedor (reemplaza la lista completa)
-// Permitido a: admin, evaluador, y el titular del propio proveedor
+// Actualiza los rubros de un proveedor usando sincronizar_rubros_proveedor()
+// - Admin y evaluador: pueden AGREGAR rubros
+// - Solo supervisor (admin con rol supervisor): puede también QUITAR rubros
+// - Titular del proveedor: puede agregar rubros propios
 
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase-server'
-import { getGrupoId } from '@/lib/grupo'
 
 export async function POST(req: Request) {
   try {
@@ -22,17 +23,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: 'Faltan parámetros: proveedor_id y rubro_ids (al menos 1)' }, { status: 400 })
     }
 
-    // Verificar que el usuario tiene permiso
+    // Obtener rol del usuario
     const { data: usuario } = await supabase
       .from('usuarios')
-      .select('rol, grupo_id')
+      .select('rol')
       .eq('id', user.id)
       .single()
 
-    const rolesPermitidos = ['admin', 'evaluador']
-    const esAdminOEvaluador = usuario && rolesPermitidos.includes(usuario.rol)
+    const esSupervisor = usuario?.rol === 'supervisor'
+    const esAdminOEvaluador = ['admin', 'evaluador', 'supervisor'].includes(usuario?.rol ?? '')
 
-    // Si no es admin/evaluador, verificar que es titular del proveedor
+    // Si no es admin/evaluador/supervisor, verificar que es titular del proveedor
     if (!esAdminOEvaluador) {
       const { data: provUser } = await supabase
         .from('proveedores_usuarios')
@@ -47,51 +48,60 @@ export async function POST(req: Request) {
       }
     }
 
-    const grupoId = await getGrupoId()
-
-    // Verificar que todos los rubro_ids pertenecen al grupo
-    const { data: rubrosValidos } = await supabase
-      .from('rubros')
-      .select('id')
-      .eq('grupo_id', grupoId)
-      .eq('activo', true)
-      .in('id', rubro_ids)
-
-    if (!rubrosValidos || rubrosValidos.length !== rubro_ids.length) {
-      return NextResponse.json({ ok: false, error: 'Uno o más rubros no son válidos' }, { status: 400 })
-    }
-
-    // Reemplazar rubros: borrar los actuales e insertar los nuevos
-    const { error: deleteError } = await supabase
+    // Obtener rubros actuales del proveedor
+    const { data: rubrosActuales } = await supabase
       .from('proveedor_rubros')
-      .delete()
+      .select('rubro_id')
       .eq('proveedor_id', proveedor_id)
 
-    if (deleteError) {
-      console.error('[rubros] delete error:', deleteError.message)
-      return NextResponse.json({ ok: false, error: 'Error al actualizar rubros' }, { status: 500 })
+    const idsActuales = (rubrosActuales ?? []).map((r: any) => r.rubro_id as string)
+    const idsNuevos   = rubro_ids
+
+    // Calcular diferencias
+    const rubrosAgregar = idsNuevos.filter(id => !idsActuales.includes(id))
+    const rubrosQuitar  = idsActuales.filter(id => !idsNuevos.includes(id))
+
+    // Solo supervisor puede quitar rubros
+    if (rubrosQuitar.length > 0 && !esSupervisor) {
+      return NextResponse.json({
+        ok: false,
+        error: 'Solo el supervisor puede retirar rubros de un proveedor'
+      }, { status: 403 })
     }
 
-    const { error: insertError } = await supabase
-      .from('proveedor_rubros')
-      .insert(rubro_ids.map(rid => ({
-        proveedor_id,
-        rubro_id: rid,
-        grupo_id: grupoId,
-      })))
-
-    if (insertError) {
-      console.error('[rubros] insert error:', insertError.message)
-      return NextResponse.json({ ok: false, error: 'Error al guardar rubros' }, { status: 500 })
+    // Si no hay cambios reales, devolver ok sin llamar RPC
+    if (rubrosAgregar.length === 0 && rubrosQuitar.length === 0) {
+      return NextResponse.json({ ok: true, docs_agregados: 0, docs_quitados: 0 })
     }
 
-    // Actualizar también el campo legacy rubro_id con el primer rubro
+    // Llamar RPC
+    const { data, error: rpcError } = await supabase.rpc('sincronizar_rubros_proveedor', {
+      p_proveedor_id:   proveedor_id,
+      p_rubros_agregar: rubrosAgregar,
+      p_rubros_quitar:  rubrosQuitar,
+    })
+
+    if (rpcError) {
+      console.error('[rubros] RPC error:', rpcError.message)
+      return NextResponse.json({ ok: false, error: rpcError.message }, { status: 500 })
+    }
+
+    const result = data as { ok: boolean; error?: string; docs_agregados?: number; docs_quitados?: number }
+    if (!result?.ok) {
+      return NextResponse.json({ ok: false, error: result?.error ?? 'Error al sincronizar rubros' }, { status: 400 })
+    }
+
+    // Actualizar campo legacy rubro_id con el primer rubro de la lista nueva
     await supabase
       .from('proveedores')
-      .update({ rubro_id: rubro_ids[0] })
+      .update({ rubro_id: idsNuevos[0] })
       .eq('id', proveedor_id)
 
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({
+      ok: true,
+      docs_agregados: result.docs_agregados ?? 0,
+      docs_quitados:  result.docs_quitados  ?? 0,
+    })
 
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : 'Error inesperado'

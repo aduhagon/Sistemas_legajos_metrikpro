@@ -127,7 +127,8 @@ export default async function LegajoDetallePage({
   const { data: usuario } = await supabase
     .from('usuarios').select('rol').eq('id', user.id).single()
 
-  const puedeEditarRubros = ['admin', 'evaluador'].includes(usuario?.rol ?? '')
+  const puedeEditarRubros = ['admin', 'evaluador', 'supervisor'].includes(usuario?.rol ?? '')
+  const esSupervisor = usuario?.rol === 'supervisor'
 
   const docs        = (proveedor.documentos_legajo as any[]) ?? []
   const equiposData = (equipos ?? []) as any[]
@@ -205,6 +206,7 @@ export default async function LegajoDetallePage({
               ))}
               {puedeEditarRubros && (
                 <EditarRubros
+                  esSupervisor={esSupervisor}
                   proveedorId={proveedor.id}
                   rubrosActuales={rubrosNombres}
                   rubrosActualesIds={rubrosActualesIds}
