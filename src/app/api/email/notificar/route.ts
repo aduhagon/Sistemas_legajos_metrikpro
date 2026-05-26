@@ -170,7 +170,8 @@ export async function POST(req: Request) {
     })
 
     const from = `"${config.smtp_from_name || 'Sistema Legajos'}" <${config.smtp_from_email || config.smtp_user}>`
-    const rubro = (proveedor.rubros as { nombre: string } | null)?.nombre ?? ''
+    const rubrosData = proveedor.rubros as { nombre: string }[] | null
+    const rubro = Array.isArray(rubrosData) ? (rubrosData[0]?.nombre ?? '') : ''
 
     let docsVencimiento: Array<{
       fecha_venc: string
