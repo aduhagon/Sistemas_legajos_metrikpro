@@ -396,7 +396,7 @@ function NuevoEquipoModal({ proveedorId, tiposEquipo, onClose, onSuccess }: {
 }
 
 // ── EquipoCard ────────────────────────────────────────────────────────────────
-function EquipoCard({ equipo, onUpload }: { equipo: Equipo; onUpload: (doc: DocEquipo) => void }) {
+function EquipoCard({ equipo, onUpload, onBaja }: { equipo: Equipo; onUpload: (doc: DocEquipo) => void; onBaja: (equipo: Equipo) => void }) {
   const [open, setOpen] = useState(false)
   const { label, color } = ESTADO_EQUIPO_LABEL[equipo.estado] ?? { label: equipo.estado, color: 'zinc' }
   const docsVencidos  = equipo.documentos_equipo.filter(d => d.estado === 'VENCIDO').length
@@ -440,6 +440,19 @@ function EquipoCard({ equipo, onUpload }: { equipo: Equipo; onUpload: (doc: DocE
           width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <polyline points="6 9 12 15 18 9"/>
         </svg>
+        {equipo.estado !== 'INACTIVO' && (
+          <button
+            onClick={e => { e.stopPropagation(); onBaja(equipo) }}
+            className="text-zinc-700 hover:text-red-400 transition-colors p-1 ml-1"
+            title="Dar de baja"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+              <path d="M10 11v6M14 11v6"/>
+            </svg>
+          </button>
+        )}
       </button>
 
       {open && (
@@ -510,6 +523,23 @@ function SeccionEquipos({ proveedorId }: { proveedorId: string }) {
   const [loading, setLoading] = useState(true)
   const [showNuevo, setShowNuevo] = useState(false)
   const [uploadDoc, setUploadDoc] = useState<DocEquipo | null>(null)
+  const [bajaEquipo, setBajaEquipo] = useState<Equipo | null>(null)
+  const [bajaLoading, setBajaLoading] = useState(false)
+  const [bajaError, setBajaError] = useState<string | null>(null)
+
+  async function confirmarBaja() {
+    if (!bajaEquipo) return
+    setBajaLoading(true)
+    setBajaError(null)
+    const { data, error } = await supabase.rpc('dar_baja_equipo', { p_equipo_id: bajaEquipo.id })
+    setBajaLoading(false)
+    if (error || data?.ok === false) {
+      setBajaError(error?.message ?? data?.error ?? 'Error al dar de baja')
+      return
+    }
+    setBajaEquipo(null)
+    cargarDatos()
+  }
 
   async function cargarDatos() {
     setLoading(true)
@@ -576,7 +606,7 @@ function SeccionEquipos({ proveedorId }: { proveedorId: string }) {
         </div>
       ) : (
         <div className="space-y-2">
-          {equipos.map(eq => <EquipoCard key={eq.id} equipo={eq} onUpload={setUploadDoc}/>)}
+          {equipos.map(eq => <EquipoCard key={eq.id} equipo={eq} onUpload={setUploadDoc} onBaja={setBajaEquipo}/>)}
         </div>
       )}
 
@@ -587,6 +617,47 @@ function SeccionEquipos({ proveedorId }: { proveedorId: string }) {
       {uploadDoc && (
         <UploadEquipoModal doc={uploadDoc}
           onClose={() => setUploadDoc(null)} onSuccess={cargarDatos}/>
+      )}
+
+      {/* Modal confirmación de baja */}
+      {bajaEquipo && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.7)' }}
+          onClick={e => { if (e.target === e.currentTarget) { setBajaEquipo(null); setBajaError(null) } }}>
+          <div className="bg-[#1a1d27] border border-white/[0.1] rounded-2xl w-full max-w-sm shadow-2xl">
+            <div className="px-5 py-4 border-b border-white/[0.06]">
+              <h3 className="text-white font-medium text-sm">Dar de baja equipo</h3>
+              <p className="text-zinc-500 text-xs mt-0.5">{bajaEquipo.tipos_equipo.icono} {bajaEquipo.dominio}</p>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <p className="text-zinc-300 text-sm">
+                ¿Confirmás que este equipo ya no requiere documentación?
+              </p>
+              <p className="text-zinc-500 text-xs">
+                El equipo pasará a estado <span className="text-zinc-400">Inactivo</span> y se eliminarán los documentos pendientes. Los documentos ya cargados o aprobados se conservan.
+              </p>
+              {bajaError && (
+                <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                  <p className="text-red-400 text-xs">{bajaError}</p>
+                </div>
+              )}
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={() => { setBajaEquipo(null); setBajaError(null) }}
+                  disabled={bajaLoading}
+                  className="flex-1 bg-white/[0.05] hover:bg-white/[0.08] text-zinc-300 text-sm py-2.5 rounded-xl">
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmarBaja}
+                  disabled={bajaLoading}
+                  className="flex-1 bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white font-medium text-sm py-2.5 rounded-xl">
+                  {bajaLoading ? 'Procesando…' : 'Dar de baja'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

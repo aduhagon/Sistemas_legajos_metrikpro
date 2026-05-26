@@ -695,39 +695,81 @@ export default function ReportesClient({
             {equiposFiltrados.length === 0 ? (
               <div className="px-5 py-8 text-center"><p className="text-zinc-500 text-sm">No hay equipos con ese estado</p></div>
             ) : (
-              <div className="divide-y divide-white/[0.04]">
-                {equiposFiltrados.map((e: any) => {
-                  const docs = e.documentos_equipo ?? []
-                  const docsOk   = docs.filter((d: any) => d.estado === 'APROBADO').length
-                  const docsVenc = docs.filter((d: any) => d.estado === 'VENCIDO').length
-                  const docsPend = docs.filter((d: any) => d.estado === 'CARGADO').length
-                  return (
-                    <div key={e.id} className="px-5 py-3 flex items-center gap-4">
-                      <span className="text-xl shrink-0">{e.tipos_equipo?.icono}</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-white text-sm font-medium font-mono">{e.dominio}</span>
-                          <span className="text-zinc-500 text-xs">{e.tipos_equipo?.nombre}</span>
-                          {e.marca && <span className="text-zinc-600 text-xs">{e.marca} {e.modelo}</span>}
-                        </div>
-                        <div className="flex items-center gap-3 mt-0.5">
-                          <Link href={`/dashboard/legajos/${e.proveedores?.id}`}
-                            className="text-zinc-400 hover:text-blue-300 text-xs transition-colors">
-                            {e.proveedores?.razon_social}
-                          </Link>
-                          <span className="text-zinc-700 text-xs">·</span>
-                          <span className="text-zinc-600 text-xs">{docsOk}/{docs.length} docs</span>
-                          {docsVenc > 0 && <span className="text-red-400 text-xs">{docsVenc} vencido{docsVenc > 1 ? 's' : ''}</span>}
-                          {docsPend > 0 && <span className="text-blue-400 text-xs">{docsPend} para revisar</span>}
-                        </div>
-                      </div>
-                      <span className={`text-xs px-2.5 py-1 rounded-full border shrink-0 ${estadoColor[e.estado] ?? estadoColor.PENDIENTE}`}>
-                        {e.estado === 'EN_REVISION' ? 'En revisión' : e.estado.charAt(0) + e.estado.slice(1).toLowerCase()}
-                      </span>
+              {/* Agrupar por proveedor */}
+              {(() => {
+                const porProveedor = new Map<string, { nombre: string; provId: string; equipos: any[] }>()
+                for (const e of equiposFiltrados) {
+                  const key = e.proveedores?.id ?? 'sin-proveedor'
+                  if (!porProveedor.has(key)) {
+                    porProveedor.set(key, { nombre: e.proveedores?.razon_social ?? '—', provId: e.proveedores?.id, equipos: [] })
+                  }
+                  porProveedor.get(key)!.equipos.push(e)
+                }
+                return Array.from(porProveedor.entries()).map(([provId, grupo], gi) => (
+                  <div key={provId} className={gi > 0 ? 'border-t border-white/[0.06]' : ''}>
+                    {/* Header proveedor */}
+                    <div className="px-5 py-2.5 bg-white/[0.02] flex items-center justify-between">
+                      <Link href={`/dashboard/legajos/${grupo.provId}`}
+                        className="text-zinc-300 text-xs font-medium hover:text-blue-300 transition-colors">
+                        {grupo.nombre}
+                      </Link>
+                      <span className="text-zinc-600 text-xs">{grupo.equipos.length} equipo{grupo.equipos.length !== 1 ? 's' : ''}</span>
                     </div>
-                  )
-                })}
-              </div>
+                    {/* Equipos del proveedor agrupados por estado */}
+                    {(() => {
+                      const porEstado = new Map<string, any[]>()
+                      for (const e of grupo.equipos) {
+                        if (!porEstado.has(e.estado)) porEstado.set(e.estado, [])
+                        porEstado.get(e.estado)!.push(e)
+                      }
+                      const ordenEstado = ['VENCIDO','RECHAZADO','EN_REVISION','PENDIENTE','APROBADO','INACTIVO']
+                      const estadosOrdenados = Array.from(porEstado.keys()).sort((a,b) => ordenEstado.indexOf(a) - ordenEstado.indexOf(b))
+                      return estadosOrdenados.map(estado => (
+                        <div key={estado}>
+                          {porEstado.size > 1 && (
+                            <div className="px-5 py-1.5 flex items-center gap-2">
+                              <span className={`text-xs px-2 py-0.5 rounded-full border ${estadoColor[estado] ?? estadoColor.PENDIENTE}`}>
+                                {estado === 'EN_REVISION' ? 'En revisión' : estado.charAt(0) + estado.slice(1).toLowerCase()}
+                              </span>
+                              <span className="text-zinc-700 text-xs">{porEstado.get(estado)!.length}</span>
+                            </div>
+                          )}
+                          <div className="divide-y divide-white/[0.03]">
+                            {porEstado.get(estado)!.map((e: any) => {
+                              const docs = e.documentos_equipo ?? []
+                              const docsOk   = docs.filter((d: any) => d.estado === 'APROBADO').length
+                              const docsVenc = docs.filter((d: any) => d.estado === 'VENCIDO').length
+                              const docsPend = docs.filter((d: any) => d.estado === 'CARGADO').length
+                              return (
+                                <div key={e.id} className="px-5 pl-8 py-3 flex items-center gap-3">
+                                  <span className="text-lg shrink-0">{e.tipos_equipo?.icono}</span>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="text-white text-sm font-medium font-mono">{e.dominio}</span>
+                                      <span className="text-zinc-500 text-xs">{e.tipos_equipo?.nombre}</span>
+                                      {e.marca && <span className="text-zinc-600 text-xs">{e.marca} {e.modelo}</span>}
+                                    </div>
+                                    <div className="flex items-center gap-2 mt-0.5">
+                                      <span className="text-zinc-600 text-xs">{docsOk}/{docs.length} docs</span>
+                                      {docsVenc > 0 && <span className="text-red-400 text-xs">· {docsVenc} vencido{docsVenc > 1 ? 's' : ''}</span>}
+                                      {docsPend > 0 && <span className="text-blue-400 text-xs">· {docsPend} para revisar</span>}
+                                    </div>
+                                  </div>
+                                  {porEstado.size === 1 && (
+                                    <span className={`text-xs px-2.5 py-1 rounded-full border shrink-0 ${estadoColor[e.estado] ?? estadoColor.PENDIENTE}`}>
+                                      {e.estado === 'EN_REVISION' ? 'En revisión' : e.estado.charAt(0) + e.estado.slice(1).toLowerCase()}
+                                    </span>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      ))
+                    })()}
+                  </div>
+                ))
+              })()}
             )}
           </div>
         </div>
