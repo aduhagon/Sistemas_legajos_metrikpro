@@ -9,9 +9,29 @@ const supabaseAdmin = createClient(
 
 type RouteParams = { params: Promise<{ id_externo: string }> }
 
+type TipoDocumento = {
+  nombre: string
+  codigo: string | null
+  obligatorio: boolean
+  aplica_rubros: unknown
+}
+
+type DocumentoRow = {
+  id: string
+  estado: string
+  fecha_venc: string | null
+  created_at: string
+  updated_at: string
+  tipos_documento: TipoDocumento | TipoDocumento[] | null
+}
+
+function getTipoDoc(tipos: TipoDocumento | TipoDocumento[] | null): TipoDocumento | null {
+  if (!tipos) return null
+  return Array.isArray(tipos) ? tipos[0] ?? null : tipos
+}
+
 // ─────────────────────────────────────────────────────────────
 // GET /api/v1/proveedores/[id_externo]/documentos
-// Detalle de cada documento del legajo con estado y vencimiento
 // ─────────────────────────────────────────────────────────────
 export async function GET(req: NextRequest, { params }: RouteParams) {
   const auth = await validateApiKey(req)
@@ -24,7 +44,6 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
   const { id_externo } = await params
 
   try {
-    // Buscar proveedor
     const { data: proveedor, error: provError } = await supabaseAdmin
       .from('proveedores')
       .select('id')
@@ -40,7 +59,6 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
       })
     }
 
-    // Documentos con tipo
     const { data: documentos, error: docsError } = await supabaseAdmin
       .from('documentos_legajo')
       .select(`
@@ -48,22 +66,23 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
         tipos_documento ( nombre, codigo, obligatorio, aplica_rubros )
       `)
       .eq('proveedor_id', proveedor.id)
-      .order('tipos_documento(nombre)')
+      .order('created_at')
 
     if (docsError) throw docsError
 
     const hoy = new Date()
 
-    const docs = (documentos ?? []).map(d => {
+    const docs = ((documentos ?? []) as DocumentoRow[]).map(d => {
+      const tipo = getTipoDoc(d.tipos_documento)
       const fechaVenc = d.fecha_venc ? new Date(d.fecha_venc) : null
       const diasParaVencer = fechaVenc
         ? Math.ceil((fechaVenc.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24))
         : null
 
       return {
-        tipo:              (d.tipos_documento as { nombre: string } | null)?.nombre ?? 'Desconocido',
-        codigo:            (d.tipos_documento as { codigo: string } | null)?.codigo ?? null,
-        obligatorio:       (d.tipos_documento as { obligatorio: boolean } | null)?.obligatorio ?? false,
+        tipo:              tipo?.nombre ?? 'Desconocido',
+        codigo:            tipo?.codigo ?? null,
+        obligatorio:       tipo?.obligatorio ?? false,
         estado:            d.estado,
         fecha_vencimiento: d.fecha_venc ?? null,
         dias_para_vencer:  diasParaVencer,
@@ -72,11 +91,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
       }
     })
 
-    return Response.json({
-      ok: true,
-      id_externo,
-      data: docs,
-    })
+    return Response.json({ ok: true, id_externo, data: docs })
   } catch (err) {
     console.error('[GET /api/v1/proveedores/[id_externo]/documentos]', err)
     return apiError({ code: 'INTERNAL_ERROR', message: 'Error interno del servidor', status: 500 })
