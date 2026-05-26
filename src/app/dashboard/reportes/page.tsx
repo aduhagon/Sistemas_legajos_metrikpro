@@ -1,11 +1,14 @@
 // src/app/dashboard/reportes/page.tsx
 import { createClient } from '@/lib/supabase-server'
+import { createAdminClient } from '@/lib/supabase-server-admin'
 import { redirect } from 'next/navigation'
 import { getGrupoId } from '@/lib/grupo'
 import ReportesClient from './ReportesClient'
 
 export default async function ReportesPage() {
-  const supabase = createClient()
+  const supabase      = createClient()
+  const supabaseAdmin = createAdminClient()
+
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
@@ -32,8 +35,8 @@ export default async function ReportesPage() {
     establecimientosFiltro = (estabsAsignados ?? []).map((r: any) => r.establecimiento_id)
   }
 
-  // ── Proveedores (con filtro de scope si aplica) ────────────────────────────
-  let queryProveedores = supabase
+  // ── Proveedores — admin client para bypassar RLS ───────────────────────────
+  let queryProveedores = supabaseAdmin
     .from('proveedores')
     .select('id, razon_social, cuit, tipo_proveedor, estado, email, telefono, created_at, notif_vencimientos, establecimiento_id, rubros(nombre), documentos_legajo(id, estado)')
     .eq('grupo_id', grupoId)
@@ -47,7 +50,7 @@ export default async function ReportesPage() {
 
   const { data: todosProveedores } = await queryProveedores
 
-  const provs = todosProveedores ?? []
+  const provs   = todosProveedores ?? []
   const provIds = provs.map((p: any) => p.id)
 
   const stats = {
@@ -59,9 +62,9 @@ export default async function ReportesPage() {
     suspendidos: provs.filter((p: any) => p.estado === 'SUSPENDIDO').length,
   }
 
-  // ── Vencimientos (filtrados por proveedores visibles) ──────────────────────
+  // ── Vencimientos — admin client ────────────────────────────────────────────
   const baseDocQuery = (estados: string[], desde?: string, hasta?: string) => {
-    let q = supabase
+    let q = supabaseAdmin
       .from('documentos_legajo')
       .select('id, fecha_venc, estado, documentos_requeridos(nombre), proveedores(id, razon_social, cuit, rubros(nombre))')
       .not('fecha_venc', 'is', null)
@@ -69,7 +72,6 @@ export default async function ReportesPage() {
       .order('fecha_venc', { ascending: desde ? true : false })
     if (desde) q = q.gte('fecha_venc', desde)
     if (hasta) q = q.lte('fecha_venc', hasta)
-    // Filtrar por proveedores visibles
     if (provIds.length > 0) q = q.in('proveedor_id', provIds)
     return q
   }
@@ -87,28 +89,29 @@ export default async function ReportesPage() {
   ] = await Promise.all([
     baseDocQuery(['CARGADO', 'APROBADO', 'VENCIDO'], undefined, hoyStr),
     baseDocQuery(['CARGADO', 'APROBADO'], hoyStr, en30diasStr),
-    supabase.from('establecimientos')
+    supabaseAdmin.from('establecimientos')
       .select('id, nombre')
       .eq('grupo_id', grupoId)
       .eq('activo', true)
       .order('nombre'),
-    supabase.from('registros_acceso')
+    supabaseAdmin.from('registros_acceso')
       .select(`id, tipo, created_at, lat, lng, dentro_perimetro, establecimiento_id,
         habilitaciones:habilitacion_id(proveedores:proveedor_id(id, razon_social, cuit, rubros(nombre)))`)
       .order('created_at', { ascending: false })
       .limit(500),
-    supabase.from('equipos_contratista')
+    // ── Equipos — admin client (bypasa RLS que bloqueaba estos datos) ─────────
+    supabaseAdmin.from('equipos_contratista')
       .select(`id, dominio, marca, modelo, anio, estado, created_at,
         tipos_equipo(nombre, icono), proveedores(id, razon_social, cuit),
         documentos_equipo(id, estado, fecha_venc)`)
       .eq('grupo_id', grupoId)
       .order('created_at', { ascending: false }),
-    supabase.from('documentos_equipo')
+    supabaseAdmin.from('documentos_equipo')
       .select(`id, fecha_venc, documentos_requeridos_equipo(nombre),
         equipos_contratista(dominio, tipos_equipo(icono), proveedores(id, razon_social))`)
       .eq('estado', 'VENCIDO')
       .order('fecha_venc', { ascending: false }),
-    supabase.from('documentos_equipo')
+    supabaseAdmin.from('documentos_equipo')
       .select(`id, fecha_venc, documentos_requeridos_equipo(nombre),
         equipos_contratista(dominio, tipos_equipo(icono), proveedores(id, razon_social))`)
       .not('fecha_venc', 'is', null)
@@ -117,7 +120,7 @@ export default async function ReportesPage() {
       .in('estado', ['CARGADO', 'APROBADO'])
       .order('fecha_venc', { ascending: true }),
     supabase.rpc('fn_actividad_reciente', { p_limit: 50 }),
-    supabase.from('visitas_auditoria')
+    supabaseAdmin.from('visitas_auditoria')
       .select(`id, visitado_at, resultado, estado_supervision,
         observacion, supervision_obs, offline, lat, lng,
         auditor:auditor_id ( nombre ),
