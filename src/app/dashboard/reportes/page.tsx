@@ -102,9 +102,9 @@ export default async function ReportesPage() {
     // ── Equipos — admin client (bypasa RLS que bloqueaba estos datos) ─────────
     supabaseAdmin.from('equipos_contratista')
       .select(`id, dominio, marca, modelo, anio, estado, created_at,
-        tipos_equipo(nombre, icono), proveedores(id, razon_social, cuit),
+        tipos_equipo(nombre, icono), proveedores!inner(id, razon_social, cuit, grupo_id),
         documentos_equipo(id, estado, fecha_venc)`)
-      .eq('grupo_id', grupoId)
+      .eq('proveedores.grupo_id', grupoId)
       .order('created_at', { ascending: false }),
     supabaseAdmin.from('documentos_equipo')
       .select(`id, fecha_venc, documentos_requeridos_equipo(nombre),
