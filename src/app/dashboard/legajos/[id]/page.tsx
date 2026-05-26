@@ -388,7 +388,7 @@ export default async function LegajoDetallePage({
                 estado={doc.estado}
                 fechaVencActual={doc.fecha_venc}
                 tipoVigencia={dr?.tipo_vigencia ?? 'ANUAL'}
-                proveedorId={proveedor.id}
+                proveedorId={proveedor!.id}
                 docNombre={dr?.nombre ?? ''}
               />
             </div>
