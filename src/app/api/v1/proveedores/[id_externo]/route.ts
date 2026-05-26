@@ -9,9 +9,24 @@ const supabaseAdmin = createClient(
 
 type RouteParams = { params: Promise<{ id_externo: string }> }
 
+type RubroJoin          = { rubros: { nombre: string; codigo: string }[] }
+type EstablecimientoJoin = { establecimientos: { nombre: string; id_externo: string }[] }
+type HabilitacionRow    = { estado: string; fecha_alta: string; fecha_venc: string; qr_token: string }
+
+type ProveedorRow = {
+  id: string
+  id_externo: string
+  razon_social: string
+  cuit: string
+  estado: string
+  created_at: string
+  proveedor_rubros: RubroJoin[] | null
+  proveedor_establecimientos: EstablecimientoJoin[] | null
+  habilitaciones: HabilitacionRow[] | null
+}
+
 // ─────────────────────────────────────────────────────────────
 // GET /api/v1/proveedores/[id_externo]
-// Estado completo del legajo para un proveedor específico
 // ─────────────────────────────────────────────────────────────
 export async function GET(req: NextRequest, { params }: RouteParams) {
   const auth = await validateApiKey(req)
@@ -24,7 +39,6 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
   const { id_externo } = await params
 
   try {
-    // Buscar proveedor
     const { data: proveedor, error: provError } = await supabaseAdmin
       .from('proveedores')
       .select(`
@@ -45,68 +59,69 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
       })
     }
 
-    // Documentos del legajo
+    const p = proveedor as unknown as ProveedorRow
+
+    // Documentos
     const { data: documentos } = await supabaseAdmin
       .from('documentos_legajo')
-      .select(`
-        id, estado, fecha_venc,
-        tipos_documento ( nombre, codigo, obligatorio )
-      `)
-      .eq('proveedor_id', proveedor.id)
-      .order('fecha_venc', { ascending: true, nullsFirst: false })
+      .select('id, estado, fecha_venc')
+      .eq('proveedor_id', p.id)
 
     const docs = documentos ?? []
-    const hoy = new Date()
+    const hoy  = new Date()
 
-    // Estadísticas de documentos
     const aprobados  = docs.filter(d => d.estado === 'APROBADO').length
     const pendientes = docs.filter(d => ['PENDIENTE', 'EN_REVISION'].includes(d.estado)).length
     const rechazados = docs.filter(d => d.estado === 'RECHAZADO').length
-    const vencidos   = docs.filter(d => {
-      if (!d.fecha_venc) return false
-      return new Date(d.fecha_venc) < hoy && d.estado === 'APROBADO'
-    }).length
+    const vencidos   = docs.filter(d =>
+      d.fecha_venc && new Date(d.fecha_venc) < hoy && d.estado === 'APROBADO'
+    ).length
 
-    // Próximo vencimiento
     const proximoVenc = docs
       .filter(d => d.fecha_venc && d.estado === 'APROBADO' && new Date(d.fecha_venc) >= hoy)
-      .map(d => d.fecha_venc)
+      .map(d => d.fecha_venc as string)
       .sort()[0] ?? null
 
     // Último acceso
+    const habIds = (p.habilitaciones ?? []).map(h => h.qr_token)
     const { data: ultimoAcceso } = await supabaseAdmin
       .from('registros_acceso')
       .select('created_at')
-      .eq('grupo_id', auth.grupo_id)
       .eq('tipo', 'ingreso')
-      .in(
-        'habilitacion_id',
-        (proveedor.habilitaciones as Array<{ qr_token: string }> ?? []).map(h => h.qr_token)
-      )
+      .in('habilitacion_id', habIds.length > 0 ? habIds : [''])
       .order('created_at', { ascending: false })
       .limit(1)
-      .single()
+      .maybeSingle()
 
-    const habilitacionVigente = (proveedor.habilitaciones as Array<{
-      estado: string; fecha_venc: string
-    }> | null)?.find(h => h.estado === 'VIGENTE')
+    const habilitacionVigente = (p.habilitaciones ?? []).find(h => h.estado === 'VIGENTE')
+
+    // Rubros: cada elemento de proveedor_rubros tiene rubros como array
+    const rubros = (p.proveedor_rubros ?? []).flatMap(pr =>
+      (pr.rubros ?? []).map((r: { nombre: string; codigo: string }) => ({
+        nombre: r.nombre,
+        codigo: r.codigo,
+      }))
+    )
+
+    // Establecimientos habilitados
+    const establecimientosHabilitados = (p.proveedor_establecimientos ?? []).flatMap(pe =>
+      (pe.establecimientos ?? [])
+        .map((e: { nombre: string; id_externo: string }) => e.id_externo)
+        .filter(Boolean)
+    )
 
     return Response.json({
       ok: true,
       data: {
-        id_externo:    proveedor.id_externo,
-        razon_social:  proveedor.razon_social,
-        cuit:          proveedor.cuit,
-        estado_legajo: proveedor.estado,
+        id_externo:    p.id_externo,
+        razon_social:  p.razon_social,
+        cuit:          p.cuit,
+        estado_legajo: p.estado,
         habilitado:    habilitacionVigente != null,
-        rubros: (proveedor.proveedor_rubros as Array<{ rubros: { nombre: string; codigo: string } }> | null)
-          ?.map(r => ({ nombre: r.rubros?.nombre, codigo: r.rubros?.codigo })) ?? [],
-        establecimientos_habilitados: (proveedor.proveedor_establecimientos as Array<{
-          establecimientos: { nombre: string; id_externo: string }
-        }> | null)
-          ?.map(e => e.establecimientos?.id_externo).filter(Boolean) ?? [],
+        rubros,
+        establecimientos_habilitados: establecimientosHabilitados,
         documentos: {
-          total:     docs.length,
+          total: docs.length,
           aprobados,
           pendientes,
           rechazados,
