@@ -136,7 +136,7 @@ export default function EditarRubros({
             </button>
             <button
               onClick={guardar}
-              disabled={saving || !hayambios}
+              disabled={saving || !haycambios}
               className="flex-1 text-xs py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-medium"
             >
               {saving ? 'Guardando…' : 'Guardar'}
