@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase-server'
+import { createAdminClient } from '@/lib/supabase-server-admin'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import AccionesLegajo from './AccionesLegajo'
@@ -8,6 +9,8 @@ import VisitasAuditoriaLegajo from './VisitasAuditoriaLegajo'
 import HistorialDocumento from './HistorialDocumento'
 import LegajoTabs from './LegajoTabs'
 import AccionesRapidasLegajo from './AccionesRapidasLegajo'
+import EditarRubros from './EditarRubros'
+import { getGrupoId } from '@/lib/grupo'
 
 type Tab = 'documentos' | 'equipos' | 'auditorias' | 'historial'
 
@@ -21,13 +24,16 @@ export default async function LegajoDetallePage({
   const { id } = await params
   const { tab: tabParam } = await searchParams
 
-  const supabase = createClient()
+  const supabase      = createClient()
+  const supabaseAdmin = createAdminClient()
+
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
   const tabActivo = (tabParam as Tab) ?? 'documentos'
+  const grupoId   = await getGrupoId()
 
-  const { data: proveedor } = await supabase
+  const { data: proveedor } = await supabaseAdmin
     .from('proveedores')
     .select(`
       id, razon_social, cuit, tipo_proveedor, estado, email, telefono, created_at,
@@ -44,22 +50,31 @@ export default async function LegajoDetallePage({
 
   if (!proveedor) redirect('/dashboard/legajos')
 
-  // ── Rubros del proveedor — combina nueva tabla + legacy ──────────────────
+  // ── Rubros del proveedor ─────────────────────────────────────────────────
+  const rubrosActualesIds: string[] = []
   const rubrosNombres: string[] = []
   const rubrosVistos = new Set<string>()
   for (const pr of (proveedor.proveedor_rubros as any[]) ?? []) {
-    const nombre = pr.rubros?.nombre
-    if (nombre && !rubrosVistos.has(nombre)) {
-      rubrosNombres.push(nombre)
-      rubrosVistos.add(nombre)
+    const rub = pr.rubros
+    if (rub?.id && !rubrosVistos.has(rub.id)) {
+      rubrosActualesIds.push(rub.id)
+      rubrosNombres.push(rub.nombre)
+      rubrosVistos.add(rub.id)
     }
   }
-  // Fallback al campo legacy si no hay nada en proveedor_rubros
   if (rubrosNombres.length === 0 && (proveedor.rubros as any)?.nombre) {
     rubrosNombres.push((proveedor.rubros as any).nombre)
   }
 
-  // Historial
+  // ── Rubros disponibles del tenant ────────────────────────────────────────
+  const { data: rubrosDisponibles } = await supabaseAdmin
+    .from('rubros')
+    .select('id, nombre, codigo')
+    .eq('grupo_id', grupoId)
+    .eq('activo', true)
+    .order('codigo')
+
+  // ── Historial ────────────────────────────────────────────────────────────
   const { data: historialData } = await supabase
     .from('documentos_legajo_historial')
     .select('id, documento_id, estado_anterior, estado_nuevo, actor_tipo, observaciones, created_at')
@@ -72,8 +87,8 @@ export default async function LegajoDetallePage({
     historialPorDoc[h.documento_id].push(h)
   }
 
-  // Equipos
-  const { data: equipos } = await supabase
+  // ── Equipos ──────────────────────────────────────────────────────────────
+  const { data: equipos } = await supabaseAdmin
     .from('equipos_contratista')
     .select(`
       id, dominio, marca, modelo, anio, estado,
@@ -86,7 +101,7 @@ export default async function LegajoDetallePage({
     .eq('proveedor_id', id)
     .order('created_at', { ascending: false })
 
-  // Visitas de auditoría
+  // ── Visitas de auditoría ─────────────────────────────────────────────────
   const { data: visitasAuditoria } = await supabase
     .from('visitas_auditoria')
     .select(`
@@ -101,7 +116,7 @@ export default async function LegajoDetallePage({
     .eq('proveedor_id', id)
     .order('visitado_at', { ascending: false })
 
-  // Habilitación
+  // ── Habilitación ─────────────────────────────────────────────────────────
   const { data: habilitacion } = await supabase
     .from('habilitaciones')
     .select('qr_token, estado')
@@ -112,7 +127,9 @@ export default async function LegajoDetallePage({
   const { data: usuario } = await supabase
     .from('usuarios').select('rol').eq('id', user.id).single()
 
-  const docs = (proveedor.documentos_legajo as any[]) ?? []
+  const puedeEditarRubros = ['admin', 'evaluador'].includes(usuario?.rol ?? '')
+
+  const docs        = (proveedor.documentos_legajo as any[]) ?? []
   const equiposData = (equipos ?? []) as any[]
 
   const docsAprobados = docs.filter(d => d.estado === 'APROBADO').length
@@ -178,17 +195,23 @@ export default async function LegajoDetallePage({
             <p className="text-zinc-500 text-sm">
               CUIT {proveedor.cuit} · {proveedor.tipo_proveedor}
             </p>
-            {/* ── Rubros como chips ── */}
-            {rubrosNombres.length > 0 && (
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {rubrosNombres.map(nombre => (
-                  <span key={nombre}
-                    className="text-xs bg-blue-500/10 border border-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full">
-                    {nombre}
-                  </span>
-                ))}
-              </div>
-            )}
+            {/* ── Rubros con botón editar ── */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {rubrosNombres.map(nombre => (
+                <span key={nombre}
+                  className="text-xs bg-blue-500/10 border border-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full">
+                  {nombre}
+                </span>
+              ))}
+              {puedeEditarRubros && (
+                <EditarRubros
+                  proveedorId={proveedor.id}
+                  rubrosActuales={rubrosNombres}
+                  rubrosActualesIds={rubrosActualesIds}
+                  rubrosDisponibles={(rubrosDisponibles ?? []) as { id: string; nombre: string; codigo: number }[]}
+                />
+              )}
+            </div>
             <span className="text-zinc-600 text-sm">
               Alta: {new Date(proveedor.created_at).toLocaleDateString('es-AR')}
             </span>
@@ -284,7 +307,6 @@ export default async function LegajoDetallePage({
             {docs.map((doc: any) => {
               const dr = doc.documentos_requeridos
               const colorClass = estadoDocColor[doc.estado] ?? estadoDocColor.PENDIENTE
-
               return (
                 <div key={doc.id} className="px-6 py-4">
                   <div className="flex items-start justify-between gap-4 mb-2">
@@ -308,7 +330,6 @@ export default async function LegajoDetallePage({
                       </span>
                     </div>
                   </div>
-
                   <div className="flex items-center gap-4 mb-2 flex-wrap">
                     {doc.fecha_presentacion && (
                       <div className="flex items-center gap-1.5">
@@ -341,11 +362,9 @@ export default async function LegajoDetallePage({
                       </div>
                     )}
                   </div>
-
                   {doc.observaciones && (
                     <p className="text-orange-400 text-xs italic mb-2">"{doc.observaciones}"</p>
                   )}
-
                   <AccionesDocumento
                     docId={doc.id}
                     estado={doc.estado}
@@ -367,12 +386,9 @@ export default async function LegajoDetallePage({
           <div className="px-6 py-4 border-b border-white/[0.06]">
             <h2 className="text-sm font-medium">Equipos y bienes de uso</h2>
             <p className="text-zinc-500 text-xs mt-0.5">
-              {equiposData.length === 0
-                ? 'Sin equipos registrados'
-                : `${equiposData.length} equipo${equiposData.length !== 1 ? 's' : ''}`}
+              {equiposData.length === 0 ? 'Sin equipos registrados' : `${equiposData.length} equipo${equiposData.length !== 1 ? 's' : ''}`}
             </p>
           </div>
-
           {equiposData.length === 0 ? (
             <div className="px-6 py-8 text-center">
               <p className="text-zinc-600 text-sm">El proveedor no ha registrado equipos todavía</p>
@@ -385,7 +401,6 @@ export default async function LegajoDetallePage({
                 const docsAprobadosEq = docsEquipo.filter((d: any) => d.estado === 'APROBADO').length
                 const docsCargadosEq  = docsEquipo.filter((d: any) => d.estado === 'CARGADO').length
                 const progresoEq = docsEquipo.length > 0 ? Math.round((docsAprobadosEq / docsEquipo.length) * 100) : 0
-
                 const estadoEquipoColor: Record<string, string> = {
                   PENDIENTE:   'text-yellow-400 border-yellow-500/20 bg-yellow-500/10',
                   EN_REVISION: 'text-blue-400 border-blue-500/20 bg-blue-500/10',
@@ -393,7 +408,6 @@ export default async function LegajoDetallePage({
                   RECHAZADO:   'text-red-400 border-red-500/20 bg-red-500/10',
                   INACTIVO:    'text-zinc-500 border-zinc-500/20 bg-zinc-500/10',
                 }
-
                 return (
                   <details key={equipo.id} className="group">
                     <summary className="px-6 py-4 flex items-center gap-4 cursor-pointer list-none hover:bg-white/[0.01] transition-colors">
@@ -424,7 +438,6 @@ export default async function LegajoDetallePage({
                         {equipo.estado.toLowerCase()}
                       </span>
                     </summary>
-
                     <div className="border-t border-white/[0.04]">
                       {docsEquipo.length === 0 ? (
                         <div className="px-6 py-4 text-center">
@@ -493,16 +506,12 @@ export default async function LegajoDetallePage({
           <div className="px-6 py-4 border-b border-white/[0.06]">
             <h2 className="text-sm font-medium">Visitas de auditoría</h2>
             <p className="text-zinc-500 text-xs mt-0.5">
-              {(visitasAuditoria ?? []).length === 0
-                ? 'Sin visitas registradas'
+              {(visitasAuditoria ?? []).length === 0 ? 'Sin visitas registradas'
                 : `${(visitasAuditoria ?? []).length} visita${(visitasAuditoria ?? []).length !== 1 ? 's' : ''} registrada${(visitasAuditoria ?? []).length !== 1 ? 's' : ''}`}
             </p>
           </div>
           <div className="px-6 py-4">
-            <VisitasAuditoriaLegajo
-              visitas={visitasAuditoria ?? []}
-              rol={usuario?.rol ?? 'evaluador'}
-            />
+            <VisitasAuditoriaLegajo visitas={visitasAuditoria ?? []} rol={usuario?.rol ?? 'evaluador'}/>
           </div>
         </div>
       )}
@@ -512,9 +521,7 @@ export default async function LegajoDetallePage({
         <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden">
           <div className="px-6 py-4 border-b border-white/[0.06]">
             <h2 className="text-sm font-medium">Historial de documentos</h2>
-            <p className="text-zinc-500 text-xs mt-0.5">
-              Todas las acciones sobre la documentación del proveedor
-            </p>
+            <p className="text-zinc-500 text-xs mt-0.5">Todas las acciones sobre la documentación del proveedor</p>
           </div>
           <div className="divide-y divide-white/[0.04]">
             {docs.map((doc: any) => {
@@ -531,7 +538,7 @@ export default async function LegajoDetallePage({
                       {doc.estado.toLowerCase()}
                     </span>
                   </div>
-                  <HistorialDocumento historial={historial} expandidoPorDefecto={true} />
+                  <HistorialDocumento historial={historial} expandidoPorDefecto={true}/>
                 </div>
               )
             })}
