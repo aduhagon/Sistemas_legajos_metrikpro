@@ -272,7 +272,7 @@ export async function POST(req: Request) {
                   )
                   const vencido = dias <= 0
                   return `<li style="margin-bottom:8px;color:${vencido ? '#b91c1c' : '#78350f'}">
-                    <strong>${(Array.isArray(d.documentos_requeridos) ? d.documentos_requeridos[0]?.nombre : d.documentos_requeridos?.nombre) ?? 'Documento'}</strong><br/>
+                    <strong>${(d.documentos_requeridos?.[0]?.nombre ?? 'Documento')}</strong><br/>
                     <span style="font-size:13px">
                       ${vencido
                         ? `⚠ Venció el ${new Date(d.fecha_venc + 'T12:00:00').toLocaleDateString('es-AR')} (hace ${Math.abs(dias)} día${Math.abs(dias) !== 1 ? 's' : ''})`
