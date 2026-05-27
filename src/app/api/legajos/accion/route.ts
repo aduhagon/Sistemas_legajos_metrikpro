@@ -50,9 +50,12 @@ export async function POST(req: NextRequest) {
     }
 
     if (rpcResult.error || rpcResult.data?.ok === false) {
-      const msg = (rpcResult.data as { error?: string } | null)?.error
-        ?? (rpcResult.error instanceof Error ? rpcResult.error.message : String(rpcResult.error))
-        ?? 'Error al ejecutar acción'
+      const rawError = (rpcResult.data as { error?: unknown } | null)?.error ?? rpcResult.error
+      let msg: string
+      if (typeof rawError === 'string') msg = rawError
+      else if (rawError instanceof Error) msg = rawError.message
+      else if (rawError && typeof rawError === 'object' && 'message' in rawError) msg = String((rawError as { message: unknown }).message)
+      else msg = 'Error al ejecutar acción'
       return NextResponse.json({ ok: false, error: msg }, { status: 400 })
     }
 
