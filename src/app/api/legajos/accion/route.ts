@@ -33,6 +33,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'No autorizado' }, { status: 401 })
     }
 
+    // Validar documentos obligatorios antes de aprobar
+    if (accion === 'aprobar') {
+      const { data: docsObligatorios } = await supabaseAdmin
+        .from('documentos_legajo')
+        .select('id, estado, documentos_requeridos!inner(obligatorio)')
+        .eq('proveedor_id', proveedor_id)
+        .eq('documentos_requeridos.obligatorio', true)
+        .not('estado', 'in', '("CARGADO","APROBADO")')
+
+      const faltantes = (docsObligatorios ?? []).length
+      if (faltantes > 0) {
+        return NextResponse.json({
+          ok: false,
+          error: `Faltan ${faltantes} documento${faltantes !== 1 ? 's' : ''} obligatorio${faltantes !== 1 ? 's' : ''} por cargar`,
+        }, { status: 400 })
+      }
+    }
+
     // Ejecutar RPC
     let rpcResult: { data: { ok: boolean; error?: string } | null; error: unknown }
 
