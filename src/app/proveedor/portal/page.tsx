@@ -2,6 +2,8 @@ import { createClient } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
 import PortalClient from './PortalClient'
 
+export const dynamic = 'force-dynamic'
+
 export default async function ProveedorPortalPage() {
   const supabase = createClient()
 
