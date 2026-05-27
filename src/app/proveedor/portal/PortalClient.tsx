@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase-client'
+import { SeccionNomina } from '@/components/SeccionNomina'
 
 // ── helpers de estado ────────────────────────────────────────────────────────
 const ESTADO_LABEL: Record<string, { label: string; color: string }> = {
@@ -45,7 +46,7 @@ function formatFecha(fechaStr: string) {
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
 
-type Tab = 'docs' | 'equipos' | 'historial' | 'personal' | 'accesos' | 'perfil' | 'auditorias'
+type Tab = 'docs' | 'equipos' | 'historial' | 'personal' | 'nomina' | 'accesos' | 'perfil' | 'auditorias'
 
 type Props = {
   proveedor: any
@@ -96,13 +97,14 @@ interface Equipo {
 }
 
 const SECCIONES: { key: Tab; icon: string; label: string; color: string; bg: string }[] = [
-  { key: 'docs',       icon: '📄', label: 'Documentos', color: 'text-blue-300',   bg: 'bg-blue-500/10 border-blue-500/20'     },
-  { key: 'equipos',    icon: '🚛', label: 'Equipos',    color: 'text-orange-300', bg: 'bg-orange-500/10 border-orange-500/20'  },
-  { key: 'historial',  icon: '🕐', label: 'Historial',  color: 'text-purple-300', bg: 'bg-purple-500/10 border-purple-500/20'  },
-  { key: 'personal',   icon: '👥', label: 'Personal',   color: 'text-teal-300',   bg: 'bg-teal-500/10 border-teal-500/20'      },
-  { key: 'accesos',    icon: '📍', label: 'Accesos',    color: 'text-green-300',  bg: 'bg-green-500/10 border-green-500/20'    },
-  { key: 'perfil',     icon: '👤', label: 'Perfil',     color: 'text-zinc-300',   bg: 'bg-zinc-500/10 border-zinc-500/20'      },
-  { key: 'auditorias', icon: '📋', label: 'Auditorías', color: 'text-yellow-300', bg: 'bg-yellow-500/10 border-yellow-500/20'  },
+  { key: 'docs',       icon: '📄', label: 'Documentos', color: 'text-blue-300',    bg: 'bg-blue-500/10 border-blue-500/20'      },
+  { key: 'equipos',    icon: '🚛', label: 'Equipos',    color: 'text-orange-300',  bg: 'bg-orange-500/10 border-orange-500/20'  },
+  { key: 'historial',  icon: '🕐', label: 'Historial',  color: 'text-purple-300',  bg: 'bg-purple-500/10 border-purple-500/20'  },
+  { key: 'personal',   icon: '👥', label: 'Personal',   color: 'text-teal-300',    bg: 'bg-teal-500/10 border-teal-500/20'      },
+  { key: 'nomina',     icon: '👷', label: 'Nómina',     color: 'text-indigo-300',  bg: 'bg-indigo-500/10 border-indigo-500/20'  },
+  { key: 'accesos',    icon: '📍', label: 'Accesos',    color: 'text-green-300',   bg: 'bg-green-500/10 border-green-500/20'    },
+  { key: 'perfil',     icon: '👤', label: 'Perfil',     color: 'text-zinc-300',    bg: 'bg-zinc-500/10 border-zinc-500/20'      },
+  { key: 'auditorias', icon: '📋', label: 'Auditorías', color: 'text-yellow-300',  bg: 'bg-yellow-500/10 border-yellow-500/20'  },
 ]
 
 // ── UploadModal (docs legajo) ─────────────────────────────────────────────────
@@ -1124,6 +1126,11 @@ export default function PortalClient({
             operariosIniciales={operarios}
             miRol={miRol}
           />
+        )}
+
+        {/* NÓMINA */}
+        {seccion === 'nomina' && (
+          <SeccionNomina proveedorId={proveedor.id} miRol={miRol} />
         )}
 
         {/* ACCESOS */}
