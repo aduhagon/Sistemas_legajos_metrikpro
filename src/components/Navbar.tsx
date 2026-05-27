@@ -41,8 +41,9 @@ export default function Navbar({ nombre, rol }: Props) {
 
   // Grupo 1 — Configuración del sistema
   const adminLinksConfig = [
-    { href: '/dashboard/configuracion',      label: 'Configuración',     icono: '⚙️' },
-    { href: '/dashboard/admin/usuarios',     label: 'Usuarios internos', icono: '👥' },
+    { href: '/dashboard/configuracion',          label: 'Configuración',     icono: '⚙️' },
+    { href: '/dashboard/admin/usuarios',         label: 'Usuarios internos', icono: '👥' },
+    { href: '/dashboard/admin/integraciones',    label: 'Integraciones ERP', icono: '🔗' },
   ]
 
   // Grupo 2 — Catálogos y datos del sistema
