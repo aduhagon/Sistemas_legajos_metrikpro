@@ -38,8 +38,9 @@ export async function POST(req: NextRequest) {
 
     if (accion === 'aprobar') {
       rpcResult = await supabaseAdmin.rpc('aprobar_proveedor', {
-        p_proveedor_id: proveedor_id,
-        p_evaluador_id: evaluador_id,
+        p_proveedor_id:       proveedor_id,
+        p_evaluador_id:       evaluador_id,
+        p_establecimiento_id: null,
       })
     } else {
       rpcResult = await supabaseAdmin.rpc('rechazar_proveedor', {
