@@ -22,37 +22,47 @@ export default function AccionesLegajo({ proveedorId, estadoActual, puedeAprobar
     setLoading(true)
     setErrorMsg('')
     const { data: { user } } = await supabase.auth.getUser()
-    const { data, error } = await supabase.rpc('aprobar_proveedor', {
-      p_proveedor_id: proveedorId,
-      p_evaluador_id: user?.id,
+
+    const res = await fetch('/api/legajos/accion', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        accion:       'aprobar',
+        proveedor_id: proveedorId,
+        evaluador_id: user?.id,
+      }),
     })
-    if (error || data?.ok === false) {
-      setErrorMsg(data?.error ?? error?.message ?? 'Error al aprobar')
+    const json = await res.json() as { ok: boolean; error?: string }
+
+    if (!json.ok) {
+      setErrorMsg(json.error ?? 'Error al aprobar')
       setLoading(false)
       return
     }
-    fetch('/api/email/notificar', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tipo: 'aprobado', proveedor_id: proveedorId }),
-    }).catch(() => {})
     setLoading(false)
     router.refresh()
   }
 
   async function rechazar() {
     setLoading(true)
+    setErrorMsg('')
     const { data: { user } } = await supabase.auth.getUser()
-    await supabase.rpc('rechazar_proveedor', {
-      p_proveedor_id: proveedorId,
-      p_evaluador_id: user?.id,
-      p_observaciones: obs,
-    })
-    fetch('/api/email/notificar', {
-      method: 'POST',
+
+    const res = await fetch('/api/legajos/accion', {
+      method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tipo: 'rechazado', proveedor_id: proveedorId }),
-    }).catch(() => {})
+      body: JSON.stringify({
+        accion:        'rechazar',
+        proveedor_id:  proveedorId,
+        evaluador_id:  user?.id,
+        observaciones: obs,
+      }),
+    })
+    const json = await res.json() as { ok: boolean; error?: string }
+
+    if (!json.ok) {
+      setErrorMsg(json.error ?? 'Error al rechazar')
+    }
     setLoading(false)
     setShowObs(false)
     router.refresh()
@@ -63,6 +73,20 @@ export default function AccionesLegajo({ proveedorId, estadoActual, puedeAprobar
     await supabase.from('proveedores')
       .update({ estado: nuevoEstado, updated_at: new Date().toISOString() })
       .eq('id', proveedorId)
+
+    // Dispatch webhook si se suspende
+    if (nuevoEstado === 'SUSPENDIDO') {
+      fetch('/api/legajos/accion', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accion:       'suspender',
+          proveedor_id: proveedorId,
+          evaluador_id: '',
+        }),
+      }).catch(() => {})
+    }
+
     setLoading(false)
     router.refresh()
   }
