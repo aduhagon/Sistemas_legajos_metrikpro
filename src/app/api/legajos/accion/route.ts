@@ -35,6 +35,20 @@ export async function POST(req: NextRequest) {
 
     // Validar documentos obligatorios antes de aprobar
     if (accion === 'aprobar') {
+      // Verificar que tiene al menos un documento
+      const { data: todosLosDocs } = await supabaseAdmin
+        .from('documentos_legajo')
+        .select('id')
+        .eq('proveedor_id', proveedor_id)
+
+      if (!todosLosDocs || todosLosDocs.length === 0) {
+        return NextResponse.json({
+          ok: false,
+          error: 'El proveedor no tiene documentos cargados',
+        }, { status: 400 })
+      }
+
+      // Verificar que no hay obligatorios sin cargar
       const { data: docsObligatorios } = await supabaseAdmin
         .from('documentos_legajo')
         .select('id, estado, documentos_requeridos!inner(obligatorio)')
