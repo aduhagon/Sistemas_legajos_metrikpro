@@ -18,6 +18,14 @@ export default function AccionesLegajo({ proveedorId, estadoActual, puedeAprobar
   const [showObs, setShowObs] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
 
+  function toStr(val: unknown): string {
+    if (!val) return ''
+    if (typeof val === 'string') return val
+    if (typeof val === 'object' && 'message' in (val as object))
+      return (val as { message: string }).message
+    return JSON.stringify(val)
+  }
+
   async function aprobar() {
     setLoading(true)
     setErrorMsg('')
@@ -32,10 +40,10 @@ export default function AccionesLegajo({ proveedorId, estadoActual, puedeAprobar
         evaluador_id: user?.id,
       }),
     })
-    const json = await res.json() as { ok: boolean; error?: string }
+    const json = await res.json() as { ok: boolean; error?: unknown }
 
     if (!json.ok) {
-      setErrorMsg(json.error ?? 'Error al aprobar')
+      setErrorMsg(toStr(json.error) || 'Error al aprobar')
       setLoading(false)
       return
     }
@@ -58,10 +66,10 @@ export default function AccionesLegajo({ proveedorId, estadoActual, puedeAprobar
         observaciones: obs,
       }),
     })
-    const json = await res.json() as { ok: boolean; error?: string }
+    const json = await res.json() as { ok: boolean; error?: unknown }
 
     if (!json.ok) {
-      setErrorMsg(json.error ?? 'Error al rechazar')
+      setErrorMsg(toStr(json.error) || 'Error al rechazar')
     }
     setLoading(false)
     setShowObs(false)
@@ -74,7 +82,6 @@ export default function AccionesLegajo({ proveedorId, estadoActual, puedeAprobar
       .update({ estado: nuevoEstado, updated_at: new Date().toISOString() })
       .eq('id', proveedorId)
 
-    // Dispatch webhook si se suspende
     if (nuevoEstado === 'SUSPENDIDO') {
       fetch('/api/legajos/accion', {
         method:  'POST',
